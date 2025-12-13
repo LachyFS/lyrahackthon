@@ -19,13 +19,13 @@ export async function GET(request: Request) {
         console.error("Failed to sync GitHub profile:", syncError);
       }
 
-      const forwardedHost = request.headers.get("x-forwarded-host");
+      const host = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
       const isLocalEnv = process.env.NODE_ENV === "development";
 
       if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${next}`);
-      } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`);
+        return NextResponse.redirect(`${host}${next}`);
+      } else if (host) {
+        return NextResponse.redirect(`https://${host}${next}`);
       } else {
         return NextResponse.redirect(`${origin}${next}`);
       }
