@@ -82,7 +82,7 @@ export default async function Home() {
                 className="mb-6 px-4 py-1.5 border-purple-500/30 bg-purple-500/10 text-purple-300 backdrop-blur-sm"
               >
                 <Sparkles className="mr-1.5 h-3 w-3" />
-                Built for the Lyra Hackathon 2025
+                Now in public beta
               </Badge>
             </div>
 
@@ -407,7 +407,7 @@ export default async function Home() {
               <Code2 className="h-4 w-4" />
               <span>DevShowcase</span>
               <span className="mx-2">·</span>
-              <span>Built for Lyra Hackathon 2025</span>
+              <span>Made with love for developers</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
               <Link href="#" className="hover:text-white transition-colors">
