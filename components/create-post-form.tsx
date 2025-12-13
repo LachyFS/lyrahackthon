@@ -33,7 +33,7 @@ export function CreatePostForm() {
     const result = await createPost(formData);
 
     if ("error" in result) {
-      setError(result.error);
+      setError(result.error ?? "An error occurred");
       setIsSubmitting(false);
     } else {
       setOpen(false);
