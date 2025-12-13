@@ -1,6 +1,4 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { signInWithGitHub } from "@/lib/actions/auth";
@@ -19,16 +17,7 @@ import {
   Command,
 } from "lucide-react";
 
-export default async function Home() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (user) {
-    redirect("/feed");
-  }
-
+export default function Home() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
       {/* Background effects */}
