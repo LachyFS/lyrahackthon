@@ -101,10 +101,24 @@ export async function deletePost(postId: string) {
   return { success: true };
 }
 
-export async function getFeedPosts(page = 1, limit = 20) {
+export async function getFeedPosts(page = 1, limit = 20, search?: string) {
   const offset = (page - 1) * limit;
 
+  let whereClause;
+  if (search && search.trim()) {
+    const searchTerm = `%${search.trim().toLowerCase()}%`;
+    whereClause = sql`(
+      LOWER(${posts.title}) LIKE ${searchTerm} OR
+      LOWER(${posts.description}) LIKE ${searchTerm} OR
+      EXISTS (
+        SELECT 1 FROM unnest(${posts.tags}::text[]) AS tag
+        WHERE LOWER(tag) LIKE ${searchTerm}
+      )
+    )`;
+  }
+
   const feedPosts = await db.query.posts.findMany({
+    where: whereClause,
     orderBy: [desc(posts.createdAt)],
     limit,
     offset,

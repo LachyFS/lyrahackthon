@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toggleLike } from "@/lib/actions/posts";
+import { toast } from "sonner";
 import type { Post, Profile } from "@/src/db/schema";
 
 interface PostCardProps {
@@ -35,6 +36,7 @@ export function PostCard({ post, initialLiked = false, showActions = true }: Pos
     if ("error" in result) {
       setLiked(!optimisticLiked);
       setLikesCount((prev) => (optimisticLiked ? prev - 1 : prev + 1));
+      toast.error(result.error);
     }
     setIsLiking(false);
   };

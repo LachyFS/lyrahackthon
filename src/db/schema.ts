@@ -141,6 +141,48 @@ export const likes = devshowcase.table(
 );
 
 // ============================================
+// WISHLISTS - What developers are looking for
+// ============================================
+export const wishlists = devshowcase.table(
+  "wishlists",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    // What they're looking for
+    type: varchar("type", { length: 50 }).notNull(), // 'job', 'collaboration', 'mentorship', 'cofounding', 'freelance'
+    title: varchar("title", { length: 255 }).notNull(),
+    description: text("description"),
+    // Preferences
+    roleType: varchar("role_type", { length: 100 }), // 'frontend', 'backend', 'fullstack', 'devops', etc.
+    workStyle: varchar("work_style", { length: 50 }), // 'remote', 'hybrid', 'onsite'
+    location: text("location"), // Preferred location if onsite/hybrid
+    salaryMin: integer("salary_min"),
+    salaryMax: integer("salary_max"),
+    salaryCurrency: varchar("salary_currency", { length: 10 }).default("USD"),
+    // Tech preferences
+    techStack: jsonb("tech_stack").$type<string[]>().default([]),
+    // Company preferences
+    companySize: varchar("company_size", { length: 50 }), // 'startup', 'mid', 'enterprise', 'any'
+    industries: jsonb("industries").$type<string[]>().default([]),
+    // Availability
+    availability: varchar("availability", { length: 50 }), // 'immediately', '2weeks', '1month', '3months', 'passive'
+    hoursPerWeek: integer("hours_per_week"), // For freelance/part-time
+    // Status
+    isActive: boolean("is_active").default(true),
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("wishlists_profile_id_idx").on(table.profileId),
+    index("wishlists_type_idx").on(table.type),
+    index("wishlists_is_active_idx").on(table.isActive),
+  ]
+);
+
+// ============================================
 // COMMENTS - Post comments
 // ============================================
 export const comments = devshowcase.table(
@@ -174,6 +216,7 @@ export const profilesRelations = relations(profiles, ({ many }) => ({
   likes: many(likes),
   followers: many(follows, { relationName: "following" }),
   following: many(follows, { relationName: "followers" }),
+  wishlists: many(wishlists),
 }));
 
 export const postsRelations = relations(posts, ({ one, many }) => ({
@@ -224,6 +267,13 @@ export const commentsRelations = relations(comments, ({ one }) => ({
   }),
 }));
 
+export const wishlistsRelations = relations(wishlists, ({ one }) => ({
+  profile: one(profiles, {
+    fields: [wishlists.profileId],
+    references: [profiles.id],
+  }),
+}));
+
 // Type exports for use in application
 export type Profile = typeof profiles.$inferSelect;
 export type NewProfile = typeof profiles.$inferInsert;
@@ -233,3 +283,5 @@ export type Follow = typeof follows.$inferSelect;
 export type Like = typeof likes.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
+export type Wishlist = typeof wishlists.$inferSelect;
+export type NewWishlist = typeof wishlists.$inferInsert;
