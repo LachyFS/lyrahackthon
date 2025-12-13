@@ -5,13 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ### Development
-- `npm run dev` - Start the Next.js development server (port 3000)
-- `npm run build` - Build the production application
-- `npm run start` - Start the production server
-- `npm run lint` - Run ESLint
+- `pnpm run dev` - Start the Next.js development server (port 3000)
+- `pnpm run build` - Build the production application
+- `pnpm run start` - Start the production server
+- `pnpm run lint` - Run ESLint
 
 ### Package Management
-The project supports npm, yarn, pnpm, or bun for package management.
+The project supports pnpm, yarn, pnpm, or bun for package management.
 
 ## Architecture
 

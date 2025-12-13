@@ -46,12 +46,55 @@ export interface GitHubEvent {
   repo: {
     name: string;
   };
+  actor?: {
+    login: string;
+    avatar_url: string;
+  };
+  payload?: {
+    pull_request?: {
+      user: {
+        login: string;
+        avatar_url: string;
+      };
+    };
+    issue?: {
+      user: {
+        login: string;
+        avatar_url: string;
+      };
+    };
+  };
+}
+
+export interface Collaborator {
+  login: string;
+  avatar_url: string;
+  type: "contributor" | "org" | "following" | "follower";
+  relationship: string;
+  repoName?: string;
+  degree: number; // 1 = direct connection, 2 = connection of connection
+  connectedVia?: string; // For 2nd degree, who they're connected through
+}
+
+export interface CollaborationData {
+  collaborators: Collaborator[];
+  organizations: Array<{
+    login: string;
+    avatar_url: string;
+    description: string | null;
+  }>;
+  connections: Array<{
+    source: string;
+    target: string;
+    type: "org" | "contributor" | "following" | "follower" | "mutual";
+  }>;
 }
 
 export interface AnalysisResult {
   profile: GitHubProfile;
   repos: GitHubRepo[];
   events: GitHubEvent[];
+  collaboration: CollaborationData;
   analysis: {
     accountAge: number; // years
     totalStars: number;
@@ -279,15 +322,211 @@ function getRecommendation(score: number): AnalysisResult["analysis"]["recommend
   return "weak";
 }
 
+async function fetchCollaborationData(
+  username: string,
+  repos: GitHubRepo[],
+  token: string | null
+): Promise<CollaborationData> {
+  const collaborators: Collaborator[] = [];
+  const connections: CollaborationData["connections"] = [];
+  const seenUsers = new Set<string>();
+  const firstDegreeUsers: Array<{ login: string; avatar_url: string; type: Collaborator["type"] }> = [];
+  seenUsers.add(username.toLowerCase());
+
+  // Fetch organizations
+  let organizations: CollaborationData["organizations"] = [];
+  try {
+    organizations = await fetchGitHub<CollaborationData["organizations"]>(
+      `/users/${username}/orgs`,
+      token
+    );
+  } catch {
+    // Orgs may not be accessible
+  }
+
+  // Add orgs as 1st degree collaborators
+  for (const org of organizations) {
+    if (!seenUsers.has(org.login.toLowerCase())) {
+      seenUsers.add(org.login.toLowerCase());
+      collaborators.push({
+        login: org.login,
+        avatar_url: org.avatar_url,
+        type: "org",
+        relationship: "Member of organization",
+        degree: 1,
+      });
+      connections.push({
+        source: username,
+        target: org.login,
+        type: "org",
+      });
+      firstDegreeUsers.push({ login: org.login, avatar_url: org.avatar_url, type: "org" });
+    }
+  }
+
+  // Fetch followers/following first to build 1st degree network
+  let followers: Array<{ login: string; avatar_url: string }> = [];
+  let following: Array<{ login: string; avatar_url: string }> = [];
+
+  try {
+    [followers, following] = await Promise.all([
+      fetchGitHub<Array<{ login: string; avatar_url: string }>>(
+        `/users/${username}/followers?per_page=15`,
+        token
+      ),
+      fetchGitHub<Array<{ login: string; avatar_url: string }>>(
+        `/users/${username}/following?per_page=15`,
+        token
+      ),
+    ]);
+
+    const followerLogins = new Set(followers.map(f => f.login.toLowerCase()));
+
+    // Add following as 1st degree
+    for (const user of following.slice(0, 10)) {
+      if (!seenUsers.has(user.login.toLowerCase())) {
+        seenUsers.add(user.login.toLowerCase());
+        const isMutual = followerLogins.has(user.login.toLowerCase());
+        collaborators.push({
+          login: user.login,
+          avatar_url: user.avatar_url,
+          type: "following",
+          relationship: isMutual ? "Mutual connection" : "Following",
+          degree: 1,
+        });
+        connections.push({
+          source: username,
+          target: user.login,
+          type: isMutual ? "mutual" : "following",
+        });
+        firstDegreeUsers.push({ login: user.login, avatar_url: user.avatar_url, type: "following" });
+      }
+    }
+
+    // Add followers as 1st degree
+    for (const user of followers.slice(0, 8)) {
+      if (!seenUsers.has(user.login.toLowerCase())) {
+        seenUsers.add(user.login.toLowerCase());
+        collaborators.push({
+          login: user.login,
+          avatar_url: user.avatar_url,
+          type: "follower",
+          relationship: "Follower",
+          degree: 1,
+        });
+        connections.push({
+          source: user.login,
+          target: username,
+          type: "follower",
+        });
+        firstDegreeUsers.push({ login: user.login, avatar_url: user.avatar_url, type: "follower" });
+      }
+    }
+  } catch {
+    // Skip if we can't fetch followers/following
+  }
+
+  // Fetch contributors from top repos as 1st degree
+  const topRepos = repos
+    .filter(r => !r.fork && r.stargazers_count > 0)
+    .sort((a, b) => b.stargazers_count - a.stargazers_count)
+    .slice(0, 3);
+
+  for (const repo of topRepos) {
+    try {
+      const contributors = await fetchGitHub<Array<{ login: string; avatar_url: string; contributions: number }>>(
+        `/repos/${repo.full_name}/contributors?per_page=5`,
+        token
+      );
+
+      for (const contributor of contributors) {
+        if (!seenUsers.has(contributor.login.toLowerCase()) && contributor.contributions > 1) {
+          seenUsers.add(contributor.login.toLowerCase());
+          collaborators.push({
+            login: contributor.login,
+            avatar_url: contributor.avatar_url,
+            type: "contributor",
+            relationship: `Contributed to ${repo.name}`,
+            repoName: repo.name,
+            degree: 1,
+          });
+          connections.push({
+            source: username,
+            target: contributor.login,
+            type: "contributor",
+          });
+          firstDegreeUsers.push({ login: contributor.login, avatar_url: contributor.avatar_url, type: "contributor" });
+        }
+      }
+    } catch {
+      // Skip if we can't fetch contributors
+    }
+  }
+
+  // Now fetch 2nd degree connections (connections of our 1st degree connections)
+  // Limit to a few key 1st degree users to avoid rate limits
+  const keyFirstDegree = firstDegreeUsers
+    .filter(u => u.type === "following" || u.type === "contributor")
+    .slice(0, 4);
+
+  for (const firstDegree of keyFirstDegree) {
+    try {
+      // Get who this 1st degree connection follows
+      const theirFollowing = await fetchGitHub<Array<{ login: string; avatar_url: string }>>(
+        `/users/${firstDegree.login}/following?per_page=5`,
+        token
+      );
+
+      for (const secondDegree of theirFollowing.slice(0, 3)) {
+        // Add connection between 1st and 2nd degree
+        if (secondDegree.login.toLowerCase() !== username.toLowerCase()) {
+          connections.push({
+            source: firstDegree.login,
+            target: secondDegree.login,
+            type: "following",
+          });
+
+          // Only add as collaborator if not already seen
+          if (!seenUsers.has(secondDegree.login.toLowerCase())) {
+            seenUsers.add(secondDegree.login.toLowerCase());
+            collaborators.push({
+              login: secondDegree.login,
+              avatar_url: secondDegree.avatar_url,
+              type: "following",
+              relationship: `Connected via ${firstDegree.login}`,
+              degree: 2,
+              connectedVia: firstDegree.login,
+            });
+          }
+        }
+      }
+    } catch {
+      // Skip on error
+    }
+
+    // Stop if we have enough 2nd degree connections
+    if (collaborators.filter(c => c.degree === 2).length >= 12) break;
+  }
+
+  return {
+    collaborators,
+    organizations,
+    connections,
+  };
+}
+
 export async function analyzeGitHubProfile(username: string): Promise<AnalysisResult> {
   const token = await getGitHubToken();
 
-  // Fetch data in parallel
+  // Fetch basic data in parallel
   const [profile, repos, events] = await Promise.all([
     fetchGitHub<GitHubProfile>(`/users/${username}`, token),
     fetchGitHub<GitHubRepo[]>(`/users/${username}/repos?per_page=100&sort=updated`, token),
     fetchGitHub<GitHubEvent[]>(`/users/${username}/events?per_page=100`, token),
   ]);
+
+  // Fetch collaboration data (depends on repos)
+  const collaboration = await fetchCollaborationData(username, repos, token);
 
   // Calculate metrics
   const now = new Date();
@@ -350,6 +589,7 @@ export async function analyzeGitHubProfile(username: string): Promise<AnalysisRe
     profile,
     repos,
     events,
+    collaboration,
     analysis: {
       accountAge: Math.round(accountAge * 10) / 10,
       totalStars,
