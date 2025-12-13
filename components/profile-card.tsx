@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toggleFollow } from "@/lib/actions/social";
+import { toast } from "sonner";
 import type { Profile } from "@/src/db/schema";
 
 interface ProfileCardProps {
@@ -30,10 +31,14 @@ export function ProfileCard({
     if (isLoading) return;
     setIsLoading(true);
 
+    const wasFollowing = following;
     setFollowing(!following);
     const result = await toggleFollow(profile.id);
     if ("error" in result) {
-      setFollowing(following);
+      setFollowing(wasFollowing);
+      toast.error(result.error);
+    } else {
+      toast.success(wasFollowing ? `Unfollowed @${profile.githubUsername}` : `Following @${profile.githubUsername}`);
     }
     setIsLoading(false);
   };

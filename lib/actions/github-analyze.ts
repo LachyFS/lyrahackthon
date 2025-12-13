@@ -1,0 +1,372 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+
+export interface GitHubProfile {
+  login: string;
+  id: number;
+  avatar_url: string;
+  name: string | null;
+  company: string | null;
+  blog: string | null;
+  location: string | null;
+  email: string | null;
+  bio: string | null;
+  twitter_username: string | null;
+  public_repos: number;
+  public_gists: number;
+  followers: number;
+  following: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  description: string | null;
+  html_url: string;
+  language: string | null;
+  stargazers_count: number;
+  forks_count: number;
+  watchers_count: number;
+  size: number;
+  created_at: string;
+  updated_at: string;
+  pushed_at: string;
+  topics: string[];
+  fork: boolean;
+}
+
+export interface GitHubEvent {
+  id: string;
+  type: string;
+  created_at: string;
+  repo: {
+    name: string;
+  };
+}
+
+export interface AnalysisResult {
+  profile: GitHubProfile;
+  repos: GitHubRepo[];
+  events: GitHubEvent[];
+  analysis: {
+    accountAge: number; // years
+    totalStars: number;
+    totalForks: number;
+    languages: { name: string; count: number; percentage: number }[];
+    topRepos: GitHubRepo[];
+    activityLevel: "very_active" | "active" | "moderate" | "low" | "inactive";
+    lastActivityDays: number;
+    averageRepoAge: number;
+    hasReadme: boolean;
+    topTopics: string[];
+    contributionPattern: string;
+    estimatedExperience: string;
+    strengths: string[];
+    concerns: string[];
+    overallScore: number; // 0-100
+    recommendation: "strong" | "good" | "moderate" | "weak";
+  };
+}
+
+async function getGitHubToken(): Promise<string | null> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (session?.provider_token) {
+    return session.provider_token;
+  }
+
+  // Fall back to environment variable for unauthenticated requests
+  return process.env.GITHUB_TOKEN || null;
+}
+
+async function fetchGitHub<T>(endpoint: string, token: string | null): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`https://api.github.com${endpoint}`, { headers });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("User not found");
+    }
+    if (response.status === 403) {
+      throw new Error("Rate limit exceeded. Please sign in with GitHub for higher limits.");
+    }
+    throw new Error(`GitHub API error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function calculateLanguages(repos: GitHubRepo[]): { name: string; count: number; percentage: number }[] {
+  const languageCounts: Record<string, number> = {};
+  let total = 0;
+
+  for (const repo of repos) {
+    if (repo.language && !repo.fork) {
+      languageCounts[repo.language] = (languageCounts[repo.language] || 0) + 1;
+      total++;
+    }
+  }
+
+  return Object.entries(languageCounts)
+    .map(([name, count]) => ({
+      name,
+      count,
+      percentage: Math.round((count / total) * 100),
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+}
+
+function calculateActivityLevel(events: GitHubEvent[], lastPush: Date | null): AnalysisResult["analysis"]["activityLevel"] {
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const recentEvents = events.filter(e => new Date(e.created_at) > thirtyDaysAgo).length;
+
+  if (recentEvents >= 50) return "very_active";
+  if (recentEvents >= 20) return "active";
+  if (recentEvents >= 5) return "moderate";
+  if (recentEvents >= 1) return "low";
+  return "inactive";
+}
+
+function estimateExperience(accountAge: number, repos: GitHubRepo[], profile: GitHubProfile): string {
+  const factors = {
+    accountAge,
+    repoCount: repos.length,
+    totalStars: repos.reduce((sum, r) => sum + r.stargazers_count, 0),
+    followers: profile.followers,
+  };
+
+  if (factors.accountAge >= 8 && factors.repoCount >= 50 && factors.totalStars >= 100) {
+    return "Senior (8+ years)";
+  }
+  if (factors.accountAge >= 5 && factors.repoCount >= 30) {
+    return "Mid-level (5-8 years)";
+  }
+  if (factors.accountAge >= 2 && factors.repoCount >= 10) {
+    return "Junior (2-5 years)";
+  }
+  return "Entry-level (0-2 years)";
+}
+
+function identifyStrengths(repos: GitHubRepo[], languages: { name: string; percentage: number }[], profile: GitHubProfile): string[] {
+  const strengths: string[] = [];
+
+  const totalStars = repos.reduce((sum, r) => sum + r.stargazers_count, 0);
+  if (totalStars >= 100) strengths.push("Popular open source projects");
+  if (totalStars >= 10) strengths.push("Community recognition (starred projects)");
+
+  if (profile.followers >= 100) strengths.push("Strong developer following");
+  if (profile.followers >= 20) strengths.push("Active community presence");
+
+  if (languages.length >= 5) strengths.push("Versatile (multiple languages)");
+  if (languages.some(l => ["TypeScript", "Rust", "Go"].includes(l.name))) {
+    strengths.push("Modern language adoption");
+  }
+
+  const originalRepos = repos.filter(r => !r.fork);
+  if (originalRepos.length >= 20) strengths.push("Prolific project creator");
+
+  const documentedRepos = repos.filter(r => r.description && r.description.length > 20);
+  if (documentedRepos.length >= repos.length * 0.5) {
+    strengths.push("Good documentation practices");
+  }
+
+  const topicRepos = repos.filter(r => r.topics && r.topics.length > 0);
+  if (topicRepos.length >= repos.length * 0.3) {
+    strengths.push("Well-organized repositories");
+  }
+
+  return strengths.slice(0, 5);
+}
+
+function identifyConcerns(repos: GitHubRepo[], events: GitHubEvent[], profile: GitHubProfile, accountAge: number): string[] {
+  const concerns: string[] = [];
+
+  // Check for inactivity
+  const now = new Date();
+  const lastEvent = events[0] ? new Date(events[0].created_at) : null;
+  if (lastEvent) {
+    const daysSinceActivity = Math.floor((now.getTime() - lastEvent.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSinceActivity > 180) concerns.push("No activity in 6+ months");
+    else if (daysSinceActivity > 90) concerns.push("Limited recent activity (90+ days)");
+  }
+
+  // Check for mostly forks
+  const forkRatio = repos.filter(r => r.fork).length / repos.length;
+  if (forkRatio > 0.7) concerns.push("Mostly forked repositories (limited original work)");
+
+  // Check for empty/abandoned repos
+  const abandonedRepos = repos.filter(r => {
+    const lastPush = new Date(r.pushed_at);
+    const repoAge = (now.getTime() - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24 * 365);
+    return repoAge > 1 && r.stargazers_count === 0 && !r.description;
+  });
+  if (abandonedRepos.length > repos.length * 0.5) {
+    concerns.push("Many incomplete/abandoned projects");
+  }
+
+  // Check for lack of documentation
+  const undocumented = repos.filter(r => !r.description);
+  if (undocumented.length > repos.length * 0.7) {
+    concerns.push("Poor documentation habits");
+  }
+
+  // Very new account
+  if (accountAge < 1) {
+    concerns.push("New GitHub account (less than 1 year)");
+  }
+
+  return concerns.slice(0, 4);
+}
+
+function calculateOverallScore(
+  profile: GitHubProfile,
+  repos: GitHubRepo[],
+  activityLevel: AnalysisResult["analysis"]["activityLevel"],
+  strengths: string[],
+  concerns: string[]
+): number {
+  let score = 50; // Base score
+
+  // Activity bonus
+  const activityBonus = {
+    very_active: 20,
+    active: 15,
+    moderate: 10,
+    low: 5,
+    inactive: 0,
+  };
+  score += activityBonus[activityLevel];
+
+  // Stars bonus
+  const totalStars = repos.reduce((sum, r) => sum + r.stargazers_count, 0);
+  score += Math.min(15, totalStars / 10);
+
+  // Followers bonus
+  score += Math.min(10, profile.followers / 20);
+
+  // Repo count bonus
+  const originalRepos = repos.filter(r => !r.fork).length;
+  score += Math.min(10, originalRepos / 5);
+
+  // Strengths bonus
+  score += strengths.length * 2;
+
+  // Concerns penalty
+  score -= concerns.length * 5;
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function getRecommendation(score: number): AnalysisResult["analysis"]["recommendation"] {
+  if (score >= 75) return "strong";
+  if (score >= 55) return "good";
+  if (score >= 35) return "moderate";
+  return "weak";
+}
+
+export async function analyzeGitHubProfile(username: string): Promise<AnalysisResult> {
+  const token = await getGitHubToken();
+
+  // Fetch data in parallel
+  const [profile, repos, events] = await Promise.all([
+    fetchGitHub<GitHubProfile>(`/users/${username}`, token),
+    fetchGitHub<GitHubRepo[]>(`/users/${username}/repos?per_page=100&sort=updated`, token),
+    fetchGitHub<GitHubEvent[]>(`/users/${username}/events?per_page=100`, token),
+  ]);
+
+  // Calculate metrics
+  const now = new Date();
+  const createdAt = new Date(profile.created_at);
+  const accountAge = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24 * 365);
+
+  const totalStars = repos.reduce((sum, r) => sum + r.stargazers_count, 0);
+  const totalForks = repos.reduce((sum, r) => sum + r.forks_count, 0);
+
+  const languages = calculateLanguages(repos);
+
+  const topRepos = [...repos]
+    .filter(r => !r.fork)
+    .sort((a, b) => b.stargazers_count - a.stargazers_count)
+    .slice(0, 6);
+
+  const lastPush = repos[0] ? new Date(repos[0].pushed_at) : null;
+  const activityLevel = calculateActivityLevel(events, lastPush);
+
+  const lastEvent = events[0] ? new Date(events[0].created_at) : null;
+  const lastActivityDays = lastEvent
+    ? Math.floor((now.getTime() - lastEvent.getTime()) / (1000 * 60 * 60 * 24))
+    : -1;
+
+  const repoAges = repos.map(r => (now.getTime() - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24 * 365));
+  const averageRepoAge = repoAges.length > 0 ? repoAges.reduce((a, b) => a + b, 0) / repoAges.length : 0;
+
+  const allTopics = repos.flatMap(r => r.topics || []);
+  const topicCounts: Record<string, number> = {};
+  allTopics.forEach(t => { topicCounts[t] = (topicCounts[t] || 0) + 1; });
+  const topTopics = Object.entries(topicCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([topic]) => topic);
+
+  const estimatedExperience = estimateExperience(accountAge, repos, profile);
+
+  const languagesForStrengths = languages.map(l => ({ name: l.name, percentage: l.percentage }));
+  const strengths = identifyStrengths(repos, languagesForStrengths, profile);
+  const concerns = identifyConcerns(repos, events, profile, accountAge);
+
+  const overallScore = calculateOverallScore(profile, repos, activityLevel, strengths, concerns);
+  const recommendation = getRecommendation(overallScore);
+
+  // Determine contribution pattern
+  let contributionPattern = "Balanced";
+  const pushEvents = events.filter(e => e.type === "PushEvent").length;
+  const prEvents = events.filter(e => e.type === "PullRequestEvent").length;
+  const issueEvents = events.filter(e => e.type === "IssuesEvent").length;
+
+  if (pushEvents > prEvents * 2 && pushEvents > issueEvents * 2) {
+    contributionPattern = "Code-focused (mostly direct commits)";
+  } else if (prEvents > pushEvents) {
+    contributionPattern = "Collaborative (mostly pull requests)";
+  } else if (issueEvents > pushEvents && issueEvents > prEvents) {
+    contributionPattern = "Community-oriented (issue discussions)";
+  }
+
+  return {
+    profile,
+    repos,
+    events,
+    analysis: {
+      accountAge: Math.round(accountAge * 10) / 10,
+      totalStars,
+      totalForks,
+      languages,
+      topRepos,
+      activityLevel,
+      lastActivityDays,
+      averageRepoAge: Math.round(averageRepoAge * 10) / 10,
+      hasReadme: repos.some(r => r.description && r.description.length > 0),
+      topTopics,
+      contributionPattern,
+      estimatedExperience,
+      strengths,
+      concerns,
+      overallScore,
+      recommendation,
+    },
+  };
+}

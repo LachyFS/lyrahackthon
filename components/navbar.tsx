@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/lib/actions/auth";
 import { CreatePostForm } from "./create-post-form";
-import { Code2, Compass, Home, User, LogOut } from "lucide-react";
+import { Code2, Compass, Home, User, LogOut, Sparkles } from "lucide-react";
 
 export async function Navbar() {
   const supabase = await createClient();
@@ -46,6 +46,13 @@ export async function Navbar() {
               >
                 <Compass className="h-4 w-4" />
                 Discover
+              </Link>
+              <Link
+                href="/wishlists"
+                className="flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Sparkles className="h-4 w-4" />
+                Wishlists
               </Link>
             </>
           )}
