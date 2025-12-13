@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       if (isLocalEnv) {
         return NextResponse.redirect(`${host}${next}`);
       } else if (host) {
-        return NextResponse.redirect(`https://${host}${next}`);
+        return NextResponse.redirect(`${host}${next}`);
       } else {
         return NextResponse.redirect(`${origin}${next}`);
       }
