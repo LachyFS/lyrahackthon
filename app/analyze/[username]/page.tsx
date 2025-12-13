@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { SearchForm } from "@/components/search-form";
 import { AISummary } from "@/components/ai-summary";
+import { CollaborationGraph } from "@/components/collaboration-graph";
 
 interface PageProps {
   params: Promise<{ username: string }>;
@@ -115,7 +116,7 @@ async function AnalysisContent({ username }: { username: string }) {
     throw error;
   }
 
-  const { profile, analysis } = result;
+  const { profile, analysis, collaboration } = result;
   const badge = getRecommendationBadge(analysis.recommendation);
 
   return (
@@ -341,6 +342,9 @@ async function AnalysisContent({ username }: { username: string }) {
                 ))}
               </div>
             </div>
+
+            {/* Collaboration Network */}
+            <CollaborationGraph profile={profile} collaboration={collaboration} />
           </div>
 
           {/* Right Column - Languages, Strengths, Concerns */}
