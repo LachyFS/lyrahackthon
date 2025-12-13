@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
-export async function signInWithGitHub() {
+export async function signInWithGitHub(): Promise<void> {
   const supabase = await createClient();
   const headersList = await headers();
   const origin = headersList.get("origin") || "http://localhost:3000";
@@ -18,7 +18,7 @@ export async function signInWithGitHub() {
   });
 
   if (error) {
-    return { error: error.message };
+    throw new Error(error.message);
   }
 
   if (data.url) {
