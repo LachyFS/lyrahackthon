@@ -15,9 +15,10 @@ import {
   TrendingUp,
   Code2,
   GitCommit,
+  Flame,
 } from "lucide-react";
 import { SearchForm } from "@/components/search-form";
-import { GitSignalLogoWave } from "@/components/gitsignal-logo";
+import { GitRadarLogoWave } from "@/components/gitradar-logo";
 import { SiteHeader } from "@/components/site-header";
 
 export default async function Home() {
@@ -62,7 +63,7 @@ export default async function Home() {
 
             {/* Subheading */}
             <p className="animate-slide-up opacity-0 delay-200 text-lg md:text-xl text-muted-foreground max-w-2xl mb-10">
-              GitSignal transforms complex GitHub profiles into plain-English insights.
+              Git Radar transforms complex GitHub profiles into plain-English insights.
               Make confident hiring decisions—no technical background required.
             </p>
 
@@ -95,6 +96,17 @@ export default async function Home() {
                 <span>·</span>
                 <Link href="/ai-search?q=React%20engineers%20with%20open%20source%20contributions" className="text-cyan-400 hover:underline">
                   &quot;React + open source&quot;
+                </Link>
+              </div>
+
+              {/* Roast Mode Button */}
+              <div className="mt-6">
+                <Link
+                  href="/ai-search?roast=true"
+                  className="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-red-600/20 to-orange-500/20 border border-red-500/30 text-red-400 hover:from-red-600/30 hover:to-orange-500/30 hover:text-red-300 hover:border-red-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-red-500/20"
+                >
+                  <Flame className="h-4 w-4 group-hover:animate-bounce" style={{ animationDuration: '0.5s' }} />
+                  <span className="font-medium">Try Roast Mode</span>
                 </Link>
               </div>
             </div>
@@ -256,7 +268,7 @@ export default async function Home() {
                 From GitHub profile to hiring insight in seconds
               </h2>
               <p className="text-muted-foreground">
-                No technical expertise needed. Just enter a username and let GitSignal do the rest.
+                No technical expertise needed. Just enter a username and let Git Radar do the rest.
               </p>
             </div>
 
@@ -273,7 +285,7 @@ export default async function Home() {
                   step: "02",
                   title: "We Do the Heavy Lifting",
                   description:
-                    "GitSignal analyzes their repositories, commit history, contributions, and coding patterns.",
+                    "Git Radar analyzes their repositories, commit history, contributions, and coding patterns.",
                   icon: Zap,
                 },
                 {
@@ -351,8 +363,8 @@ export default async function Home() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <GitSignalLogoWave className="h-5 w-5" />
-              <span>GitSignal</span>
+              <GitRadarLogoWave className="h-5 w-5" />
+              <span>Git Radar</span>
               <span className="mx-2">·</span>
               <span>Technical hiring insights for everyone</span>
             </div>

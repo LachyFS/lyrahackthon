@@ -44,7 +44,7 @@ function AnalysisSkeleton() {
           <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
             <BarChart3 className="h-6 w-6 text-emerald-400" />
             <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
+              Git Radar
             </span>
           </Link>
         </div>
@@ -136,7 +136,7 @@ async function AnalysisContent({ username }: { username: string }) {
               <BarChart3 className="h-6 w-6 text-emerald-400 transition-transform group-hover:scale-110" />
             </div>
             <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
+              Git Radar
             </span>
           </Link>
           <div className="hidden md:block w-96">
@@ -443,7 +443,7 @@ async function AnalysisContent({ username }: { username: string }) {
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <BarChart3 className="h-4 w-4" />
-              <span>GitSignal</span>
+              <span>Git Radar</span>
               <span className="mx-2">·</span>
               <span>Developer insights for hiring managers</span>
             </div>

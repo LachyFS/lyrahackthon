@@ -137,8 +137,7 @@ async function getGitHubToken(): Promise<string | null> {
     return session.provider_token;
   }
 
-  // Fall back to environment variable for unauthenticated requests
-  return process.env.GITHUB_TOKEN || null;
+  return null;
 }
 
 async function fetchGitHub<T>(endpoint: string, token: string | null): Promise<T> {
@@ -250,15 +249,15 @@ const llmAnalysisSchema = z.object({
 
   contributionPattern: z.string().describe("A brief description of how this developer typically contributes (e.g., 'Code-focused', 'Collaborative via PRs', 'Community-oriented')"),
 
-  strengths: z.array(z.string()).max(5).describe("Key strengths identified from their GitHub activity, projects, and profile. Be specific and evidence-based."),
+  strengths: z.array(z.string()).describe("Key strengths identified from their GitHub activity, projects, and profile. Be specific and evidence-based."),
 
-  concerns: z.array(z.string()).max(4).describe("Potential concerns or areas for follow-up during hiring. Only include if there's actual evidence."),
+  concerns: z.array(z.string()).describe("Potential concerns or areas for follow-up during hiring. Only include if there's actual evidence."),
 
-  overallScore: z.number().min(0).max(100).describe("Overall candidate score from 0-100 based on activity, project quality, experience signals, and profile completeness"),
+  overallScore: z.number().describe("Overall candidate score from 0-100 based on activity, project quality, experience signals, and profile completeness"),
 
   recommendation: z.enum(["strong", "good", "moderate", "weak"]).describe("Hiring recommendation based on overall assessment"),
 
-  summary: z.string().max(300).describe("A 2-3 sentence summary of this candidate suitable for a hiring manager"),
+  summary: z.string().describe("A 2-3 sentence summary of this candidate suitable for a hiring manager"),
 });
 
 type LLMAnalysis = z.infer<typeof llmAnalysisSchema>;

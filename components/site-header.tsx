@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { GithubIcon, ArrowLeft, ExternalLink, LogOut } from "lucide-react";
-import { GitSignalLogoWave } from "@/components/gitsignal-logo";
+import { GitRadarLogoWave, GitRoastLogo } from "@/components/gitradar-logo";
 import { signInWithGitHub, signOut } from "@/lib/actions/auth";
 import { ReactNode } from "react";
 import { User } from "@supabase/supabase-js";
@@ -40,6 +40,8 @@ interface SiteHeaderProps {
   rightContent?: ReactNode;
   /** Whether to use compact height (h-14 vs h-16) */
   compact?: boolean;
+  /** Whether roast mode is enabled */
+  roastMode?: boolean;
 }
 
 export function SiteHeader({
@@ -51,6 +53,7 @@ export function SiteHeader({
   user,
   rightContent,
   compact = false,
+  roastMode = false,
 }: SiteHeaderProps) {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
@@ -59,11 +62,15 @@ export function SiteHeader({
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
             <div className="relative">
-              <GitSignalLogoWave className="h-7 w-7 transition-transform group-hover:scale-110" />
-              <div className="absolute inset-0 blur-lg bg-emerald-400/50 opacity-0 group-hover:opacity-100 transition-opacity" />
+              {roastMode ? (
+                <GitRoastLogo className="h-7 w-7 transition-transform group-hover:scale-110" />
+              ) : (
+                <GitRadarLogoWave className="h-7 w-7 transition-transform group-hover:scale-110" />
+              )}
+              <div className={`absolute inset-0 blur-lg opacity-0 group-hover:opacity-100 transition-opacity ${roastMode ? 'bg-red-500/50' : 'bg-emerald-400/50'}`} />
             </div>
-            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
+            <span className={`bg-clip-text text-transparent ${roastMode ? 'bg-gradient-to-r from-red-400 to-orange-400' : 'bg-gradient-to-r from-white to-white/70'}`}>
+              {roastMode ? 'Git Roast' : 'Git Radar'}
             </span>
           </Link>
 

@@ -12,7 +12,7 @@ export default function AnalyzeLoading() {
           <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
             <BarChart3 className="h-6 w-6 text-emerald-400" />
             <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
+              Git Radar
             </span>
           </Link>
         </div>

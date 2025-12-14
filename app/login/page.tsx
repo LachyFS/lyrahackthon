@@ -26,10 +26,10 @@ export default async function LoginPage() {
           <Link href="/" className="flex items-center justify-center gap-2 mb-4">
             <BarChart3 className="h-8 w-8 text-emerald-400" />
             <span className="text-xl font-bold bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
+              Git Radar
             </span>
           </Link>
-          <CardTitle className="text-2xl text-white">Welcome to GitSignal</CardTitle>
+          <CardTitle className="text-2xl text-white">Welcome to Git Radar</CardTitle>
           <CardDescription>
             Sign in with GitHub for higher API rate limits and to save your analyzed profiles
           </CardDescription>

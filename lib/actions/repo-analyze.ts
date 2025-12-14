@@ -1,10 +1,11 @@
 "use server";
 
 import { Sandbox } from "@vercel/sandbox";
-import { generateText, tool } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { streamText, tool, stepCountIs, ToolLoopAgent, streamObject, Output } from "ai";
 import { z } from "zod";
 import { Writable } from "stream";
+import { Octokit } from "octokit";
+import { schema } from "@vercel/sandbox/dist/utils/get-credentials";
 
 // ============================================================================
 // TYPES & SCHEMAS
@@ -109,6 +110,31 @@ const repoAnalysisSchema = z.object({
 
 export type RepoAnalysis = z.infer<typeof repoAnalysisSchema>;
 
+// Progress update types for streaming to UI
+export type AnalysisProgressStatus =
+  | 'validating'
+  | 'spinning_up_sandbox'
+  | 'cloning_repository'
+  | 'executing_command'
+  | 'analyzing'
+  | 'generating_report'
+  | 'complete'
+  | 'error';
+
+export interface AnalysisProgress {
+  status: AnalysisProgressStatus;
+  message: string;
+  repoName?: string;
+  repoOwner?: string;
+  command?: string;
+  purpose?: string;
+  commandOutput?: string;
+  stepNumber?: number;
+  totalSteps?: number;
+  result?: RepoAnalysis;
+  error?: string;
+}
+
 // ============================================================================
 // UTILITIES
 // ============================================================================
@@ -141,29 +167,70 @@ interface CommandResult {
   exitCode: number;
 }
 
+interface StreamingCommandChunk {
+  type: 'stdout' | 'stderr';
+  data: string;
+  accumulated: string;
+}
+
 /**
- * Creates a writable stream that collects data into a string
+ * Creates a writable stream that calls a callback on each chunk
  */
-function createCollectorStream(): { stream: Writable; getData: () => string } {
+function createStreamingCollector(
+  onChunk: (chunk: string) => void
+): { stream: Writable; getData: () => string } {
   let data = "";
   const stream = new Writable({
     write(chunk, _encoding, callback) {
-      data += chunk.toString();
+      const str = chunk.toString();
+      data += str;
+      onChunk(str);
       callback();
     },
   });
   return { stream, getData: () => data };
 }
 
-async function runSandboxCommand(
+/**
+ * Streaming version of runSandboxCommand - yields output chunks as they arrive
+ */
+async function* runSandboxCommandStreaming(
   sandbox: Sandbox,
   command: string,
   options?: { cwd?: string }
-): Promise<CommandResult> {
-  const stdoutCollector = createCollectorStream();
-  const stderrCollector = createCollectorStream();
+): AsyncGenerator<StreamingCommandChunk, CommandResult, unknown> {
+  const startTime = Date.now();
+  
+  if (options?.cwd) {
+    
+  }
 
-  const result = await sandbox.runCommand({
+  // Queue to hold chunks that need to be yielded
+  const chunkQueue: StreamingCommandChunk[] = [];
+  let resolveChunk: (() => void) | null = null;
+  let stdoutAccumulated = "";
+  let stderrAccumulated = "";
+
+  const stdoutCollector = createStreamingCollector((chunk) => {
+    stdoutAccumulated += chunk;
+    chunkQueue.push({ type: 'stdout', data: chunk, accumulated: stdoutAccumulated });
+    if (resolveChunk) {
+      resolveChunk();
+      resolveChunk = null;
+    }
+  });
+
+  const stderrCollector = createStreamingCollector((chunk) => {
+    stderrAccumulated += chunk;
+    chunkQueue.push({ type: 'stderr', data: chunk, accumulated: stderrAccumulated });
+    if (resolveChunk) {
+      resolveChunk();
+      resolveChunk = null;
+    }
+  });
+
+  // Start the command (don't await yet)
+  const commandPromise = sandbox.runCommand({
     cmd: "bash",
     args: ["-c", command],
     stdout: stdoutCollector.stream,
@@ -171,105 +238,236 @@ async function runSandboxCommand(
     cwd: options?.cwd,
   });
 
+  let commandDone = false;
+  let commandResult: Awaited<typeof commandPromise> | null = null;
+
+  // Handle command completion
+  commandPromise.then((result) => {
+    commandDone = true;
+    commandResult = result;
+    // Wake up the generator if it's waiting
+    if (resolveChunk) {
+      resolveChunk();
+      resolveChunk = null;
+    }
+  });
+
+  // Yield chunks as they arrive
+  while (!commandDone || chunkQueue.length > 0) {
+    if (chunkQueue.length > 0) {
+      yield chunkQueue.shift()!;
+    } else if (!commandDone) {
+      // Wait for either a new chunk or command completion
+      await new Promise<void>((resolve) => {
+        resolveChunk = resolve;
+      });
+    }
+  }
+
+  // Ensure command is done
+  const result = commandResult || await commandPromise;
+
+  const duration = Date.now() - startTime;
+  const stdout = stdoutCollector.getData().trim();
+  const stderr = stderrCollector.getData().trim();
+
+  
+  if (stdout) {
+    
+  }
+  if (stderr) {
+    
+  }
+
   return {
-    stdout: stdoutCollector.getData().trim(),
-    stderr: stderrCollector.getData().trim(),
+    stdout,
+    stderr,
     exitCode: result.exitCode,
   };
 }
 
 // ============================================================================
-// MAIN ANALYSIS FUNCTION
+// HTML ENTITY DECODER
 // ============================================================================
 
-export async function analyzeRepository(
+function decodeHtmlEntities(str: string): string {
+  return str
+    // Named entities
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&tab;/g, '\t')
+    .replace(/&newline;/g, '\n')
+    // Numeric entities (decimal)
+    .replace(/&#39;/g, "'")
+    .replace(/&#34;/g, '"')
+    .replace(/&#38;/g, '&')
+    .replace(/&#60;/g, '<')
+    .replace(/&#62;/g, '>')
+    .replace(/&#96;/g, '`')
+    .replace(/&#124;/g, '|')
+    .replace(/&#92;/g, '\\')
+    // Numeric entities (hex)
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x22;/gi, '"')
+    .replace(/&#x26;/gi, '&')
+    .replace(/&#x3c;/gi, '<')
+    .replace(/&#x3e;/gi, '>')
+    .replace(/&#x60;/gi, '`')
+    .replace(/&#x7c;/gi, '|')
+    .replace(/&#x5c;/gi, '\\')
+    // Generic numeric entity decoder for any remaining entities
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+}
+
+// Security patterns for command sanitization
+const DANGEROUS_PATTERNS = [
+  /rm\s+-rf/i,
+  /mkfs/i,
+  /dd\s+if=/i,
+  /:(){ :|:& };:/,
+  /fork\s*bomb/i,
+  />\s*\/dev\/sd/i,
+];
+
+// ============================================================================
+// MAIN ANALYSIS FUNCTION (Async Generator for streaming progress)
+// ============================================================================
+
+export async function* analyzeRepositoryWithProgress(
   config: RepoAnalysisConfig
-): Promise<RepoAnalysis> {
+): AsyncGenerator<AnalysisProgress, AnalysisProgress, unknown> {
   const { repoUrl, timeout = "5m", hiringBrief, vcpus = 2 } = config;
 
   // Parse repo URL to get owner/name
   const urlMatch = repoUrl.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/);
   if (!urlMatch) {
-    throw new Error("Invalid GitHub repository URL. Expected format: https://github.com/owner/repo");
+    yield {
+      status: 'error',
+      message: 'Invalid GitHub repository URL',
+      error: 'Expected format: https://github.com/owner/repo'
+    };
+    return {
+      status: 'error',
+      message: 'Invalid GitHub repository URL',
+      error: 'Expected format: https://github.com/owner/repo'
+    };
   }
   const [, repoOwner, repoName] = urlMatch;
 
-  // Create the sandbox
-  const sandbox = await Sandbox.create({
-    source: {
-      url: repoUrl.endsWith(".git") ? repoUrl : `${repoUrl}.git`,
-      type: "git",
-    },
-    resources: { vcpus },
-    timeout: parseTimeout(timeout),
-    runtime: "node24",
-  });
+  // Yield: Spinning up sandbox
+  yield {
+    status: 'spinning_up_sandbox',
+    message: `Spinning up virtual sandbox for ${repoOwner}/${repoName}...`,
+    repoName,
+    repoOwner,
+  };
+
+  let sandbox: Sandbox;
+  try {
+    sandbox = await Sandbox.create({
+      source: {
+        url: repoUrl.endsWith(".git") ? repoUrl : `${repoUrl}.git`,
+        type: "git",
+      },
+      resources: { vcpus },
+      timeout: parseTimeout(timeout),
+      runtime: "node24",
+    });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    yield {
+      status: 'error',
+      message: 'Failed to create sandbox',
+      error: errorMsg
+    };
+    return {
+      status: 'error',
+      message: 'Failed to create sandbox',
+      error: errorMsg
+    };
+  }
+
+  // Yield: Repository cloned
+  yield {
+    status: 'cloning_repository',
+    message: `Repository cloned successfully. Starting analysis...`,
+    repoName,
+    repoOwner,
+  };
 
   try {
     // Track all commands and findings for the final analysis
     const commandHistory: Array<{ command: string; purpose: string; output: string }> = [];
+    let stepNumber = 0;
 
-    // Define the bash tool for the LLM to use
+    // Define the bash tool - simple async function, progress is yielded via fullStream events
     const bashTool = tool({
       description: `Execute a bash command in the repository sandbox to analyze the codebase.
 The repository has already been cloned to /vercel/sandbox.
 You have access to common tools: git, find, grep, wc, head, tail, cat, ls, tree (if installed), etc.
 Use this to explore the codebase structure, read files, analyze git history, count lines of code, etc.
 Be thorough but efficient - gather the information you need to assess the developer's skill level and professionalism.`,
-      parameters: z.object({
+      inputSchema: z.object({
         command: z.string().describe("The bash command to execute"),
         purpose: z.string().describe("Brief description of why you're running this command"),
       }),
-      execute: async ({ command, purpose }) => {
-        // Security: basic command sanitization
-        const dangerousPatterns = [
-          /rm\s+-rf/i,
-          /mkfs/i,
-          /dd\s+if=/i,
-          /:(){ :|:& };:/,
-          /fork\s*bomb/i,
-          />\s*\/dev\/sd/i,
-        ];
+      execute: async ({ command: rawCommand, purpose }) => {
+        const command = decodeHtmlEntities(rawCommand);
 
-        for (const pattern of dangerousPatterns) {
+        
+        
+
+        // Security check
+        for (const pattern of DANGEROUS_PATTERNS) {
           if (pattern.test(command)) {
+            console.warn(`[BASH TOOL] BLOCKED: Command matched dangerous pattern: ${pattern}`);
             return {
               success: false,
-              output: "Command blocked for security reasons",
-              error: "Potentially dangerous command detected",
+              output: 'Command blocked for security reasons',
+              error: 'Potentially dangerous command detected',
             };
           }
         }
 
+        // Execute command in sandbox
         try {
-          // Execute command in sandbox
-          const result = await runSandboxCommand(
-            sandbox,
-            command,
-            { cwd: "/vercel/sandbox" }
-          );
+          const streamingCommand = runSandboxCommandStreaming(sandbox, command, { cwd: "/vercel/sandbox" });
+
+          // Consume the streaming generator to get the final result
+          let result: CommandResult | undefined;
+          let iterResult = await streamingCommand.next();
+
+          while (!iterResult.done) {
+            iterResult = await streamingCommand.next();
+          }
+
+          // When done=true, value contains the return value
+          result = iterResult.value as CommandResult;
 
           const output = result.stdout || result.stderr || "(no output)";
-
-          // Truncate very long outputs
           const truncatedOutput = output.length > 10000
             ? output.slice(0, 10000) + "\n... (output truncated)"
             : output;
 
-          commandHistory.push({
-            command,
-            purpose,
-            output: truncatedOutput,
-          });
+          commandHistory.push({ command, purpose, output: truncatedOutput });
+
+          const success = result.exitCode === 0;
+          
 
           return {
-            success: result.exitCode === 0,
+            success,
             output: truncatedOutput,
             exitCode: result.exitCode,
             error: result.exitCode !== 0 ? result.stderr : null,
           };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error(`[BASH TOOL] Exception: ${errorMessage}`);
           return {
             success: false,
             output: "",
@@ -309,60 +507,131 @@ SUGGESTED ANALYSIS APPROACH:
 7. Analyze dependencies and build configuration
 8. Look at recent commits for commit message quality
 
-Be efficient with commands - you have a limited time in the sandbox. Focus on gathering the most informative data.`;
+Be efficient with commands - you have a limited time in the sandbox. Focus on gathering the most informative data.
 
-    // Run the analysis using the LLM with tool calling
-    const { text: analysisNotes } = await generateText({
-      model: anthropic("claude-sonnet-4-20250514"),
+After gathering information, provide your complete structured analysis as a JSON object matching the required schema.`;
+
+    // Yield: Starting analysis
+    yield {
+      status: 'analyzing',
+      message: 'AI agent starting codebase analysis...',
+      repoName,
+      repoOwner,
+    };
+
+    const result = streamText({
+      model: "xai/grok-4.1-fast-reasoning",
       system: systemPrompt,
+      output: Output.object({ schema: repoAnalysisSchema }),
       prompt: `Analyze this repository thoroughly. Use the bash tool to explore the codebase and gather information.
-After you've gathered enough information, provide your analysis.
 
-Start by exploring the repository structure, then dig deeper into areas that reveal developer skill and professionalism.
-Collect evidence for your assessment - specific examples are more valuable than general impressions.`,
+      Start by exploring the repository structure, then dig deeper into areas that reveal developer skill and professionalism.
+      Collect evidence for your assessment - specific examples are more valuable than general impressions.
+
+      After gathering enough information, provide your complete structured analysis.`,  
+      stopWhen: stepCountIs(25),
       tools: { bash: bashTool },
-      maxSteps: 25, // Allow up to 25 tool calls for thorough analysis
-      maxRetries: 2,
-    } as Parameters<typeof generateText>[0]);
-
-    // Now generate the structured analysis based on the findings
-    const { text: structuredJson } = await generateText({
-      model: anthropic("claude-sonnet-4-20250514"),
-      system: `You are generating a structured JSON analysis of a code repository.
-Based on the analysis notes and command outputs provided, generate a comprehensive assessment.
-
-IMPORTANT:
-- Output ONLY valid JSON matching the schema
-- Be fair and balanced in your assessment
-- Use the evidence from the command outputs to support your conclusions
-- If you couldn't determine something, use null or reasonable defaults
-- The 'rawFindings' should summarize key discoveries from commands run`,
-      prompt: `Based on this analysis of ${repoOwner}/${repoName}:
-
-ANALYSIS NOTES:
-${analysisNotes}
-
-COMMAND HISTORY:
-${commandHistory.map(c => `Command: ${c.command}\nPurpose: ${c.purpose}\nOutput (excerpt): ${c.output.slice(0, 500)}...`).join("\n\n")}
-
-Generate a structured JSON analysis following this schema:
-${JSON.stringify(repoAnalysisSchema.shape, null, 2)}
-
-Output ONLY the JSON object, no markdown or explanation.`,
     });
 
-    // Parse and validate the structured output
-    let parsedAnalysis: RepoAnalysis;
+    // Track pending tool calls to match with results
+    const pendingTools: Map<string, { toolName: string; args: { command: string; purpose: string } }> = new Map();
+
+    // Iterate over fullStream and yield on EVERY relevant event
+    let finalText = "";
+    for await (const part of result.fullStream) {
+
+      
+
+      // Track tool calls when they start - yield immediately
+      if (part.type === 'tool-call') {
+        // The AI SDK uses 'input' not 'args' for tool call parameters
+        const toolCall = part as { toolCallId: string; toolName: string; input?: { command: string; purpose: string } };
+        
+
+        if (toolCall.toolName === 'bash' && toolCall.input) {
+          pendingTools.set(toolCall.toolCallId, {
+            toolName: toolCall.toolName,
+            args: toolCall.input,
+          });
+
+          // Yield: Command starting
+          stepNumber++;
+          const progress: AnalysisProgress = {
+            status: 'executing_command',
+            message: toolCall.input.purpose,
+            repoName,
+            repoOwner,
+            command: toolCall.input.command,
+            purpose: toolCall.input.purpose,
+            stepNumber,
+          };
+          yield progress;
+        }
+      }
+
+      // Yield progress when tool results come in
+      if (part.type === 'tool-result') {
+        const toolResultPart = part as { toolCallId: string; toolName: string; result?: unknown };
+        
+        const toolCallInfo = pendingTools.get(toolResultPart.toolCallId);
+
+        if (toolCallInfo && toolResultPart.result) {
+          const toolResult = toolResultPart.result as { success?: boolean; output?: string; error?: string };
+
+          // Yield: Command completed with output
+          const progress: AnalysisProgress = {
+            status: 'executing_command',
+            message: `${toolCallInfo.args.purpose} - ${toolResult.success ? 'completed' : 'failed'}`,
+            repoName,
+            repoOwner,
+            command: toolCallInfo.args.command,
+            purpose: toolCallInfo.args.purpose,
+            commandOutput: (toolResult.output || toolResult.error || '').slice(0, 500),
+            stepNumber,
+          };
+          yield progress;
+
+          pendingTools.delete(toolResultPart.toolCallId);
+        }
+      }
+
+      // Accumulate final text
+      if (part.type === 'text-delta') {
+        const textPart = part as { text?: string };
+        finalText += textPart.text || '';
+      }
+    }
+
+    // Try to parse the final text as our structured output
+    let output: RepoAnalysis | undefined;
     try {
-      // Extract JSON from potential markdown code blocks
-      const jsonMatch = structuredJson.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, structuredJson];
-      const jsonStr = jsonMatch[1] || structuredJson;
+      // Find JSON in the response (might be wrapped in markdown code blocks)
+      const jsonMatch = finalText.match(/```json\s*([\s\S]*?)\s*```/) ||
+                        finalText.match(/```\s*([\s\S]*?)\s*```/) ||
+                        [null, finalText];
+      const jsonStr = jsonMatch[1] || finalText;
+
+      // Try to parse as JSON
       const parsed = JSON.parse(jsonStr.trim());
-      parsedAnalysis = repoAnalysisSchema.parse(parsed);
-    } catch (parseError) {
-      // If parsing fails, create a basic analysis from what we have
-      console.error("Failed to parse structured analysis:", parseError);
-      parsedAnalysis = {
+      output = repoAnalysisSchema.parse(parsed);
+    } catch {
+      console.error("Failed to parse structured output from text");
+    }
+
+    // Yield: Generating report
+    yield {
+      status: 'generating_report',
+      message: 'Generating final analysis report...',
+      repoName,
+      repoOwner,
+      stepNumber,
+      totalSteps: stepNumber,
+    };
+
+    // Handle missing output
+    if (!output) {
+      console.error("Agent returned no output");
+      const fallbackResult: RepoAnalysis = {
         repoName,
         repoOwner,
         description: null,
@@ -375,9 +644,9 @@ Output ONLY the JSON object, no markdown or explanation.`,
         codeQuality: "average",
         skillLevel: "intermediate",
         skillIndicators: [{
-          indicator: "Analysis completed with limited parsing",
+          indicator: "Analysis completed but output parsing failed",
           significance: "neutral",
-          explanation: "The structured analysis couldn't be fully parsed"
+          explanation: "The agent completed but didn't return structured output"
         }],
         professionalism: {
           score: 5,
@@ -398,9 +667,9 @@ Output ONLY the JSON object, no markdown or explanation.`,
           fileCount: 0,
           architecturePattern: null
         },
-        strengths: ["Repository was successfully analyzed"],
+        strengths: ["Repository was analyzed"],
         areasForGrowth: [],
-        summary: analysisNotes.slice(0, 500),
+        summary: "Analysis completed but structured output was not generated.",
         hiringRecommendation: "maybe",
         rawFindings: commandHistory.map(c => ({
           command: c.command,
@@ -408,9 +677,33 @@ Output ONLY the JSON object, no markdown or explanation.`,
           keyFindings: c.output.slice(0, 200)
         }))
       };
+
+      const fallbackProgress: AnalysisProgress = {
+        status: 'complete',
+        message: 'Analysis complete (with fallback)',
+        repoName,
+        repoOwner,
+        result: fallbackResult,
+        stepNumber,
+        totalSteps: stepNumber,
+      };
+      yield fallbackProgress;
+      return fallbackProgress;
     }
 
-    return parsedAnalysis;
+    // Return complete
+    const finalProgress: AnalysisProgress = {
+      status: 'complete',
+      message: 'Analysis complete!',
+      repoName,
+      repoOwner,
+      result: output,
+      stepNumber,
+      totalSteps: stepNumber,
+    };
+    yield finalProgress;
+    return finalProgress;
+
   } finally {
     // Always clean up the sandbox
     try {
@@ -422,10 +715,34 @@ Output ONLY the JSON object, no markdown or explanation.`,
 }
 
 // ============================================================================
+// SIMPLE WRAPPER (for backwards compatibility)
+// ============================================================================
+
+export async function analyzeRepository(
+  config: RepoAnalysisConfig
+): Promise<RepoAnalysis> {
+  let lastProgress: AnalysisProgress | undefined;
+
+  for await (const progress of analyzeRepositoryWithProgress(config)) {
+    lastProgress = progress;
+  }
+
+  if (lastProgress?.status === 'complete' && lastProgress.result) {
+    return lastProgress.result;
+  }
+
+  if (lastProgress?.status === 'error') {
+    throw new Error(lastProgress.error || lastProgress.message);
+  }
+
+  throw new Error('Analysis failed: No result returned');
+}
+
+// ============================================================================
 // LIGHTWEIGHT QUICK ANALYSIS (no sandbox, just git metadata)
 // ============================================================================
 
-export async function quickRepoCheck(repoUrl: string): Promise<{
+export async function quickRepoCheck(repoUrl: string, token: string): Promise<{
   isValid: boolean;
   repoInfo: {
     owner: string;
@@ -445,31 +762,10 @@ export async function quickRepoCheck(repoUrl: string): Promise<{
 
   const [, owner, name] = urlMatch;
 
-  // Quick check if repo exists via GitHub API
+  // Quick check if repo exists via GitHub API using Octokit
   try {
-    const response = await fetch(`https://api.github.com/repos/${owner}/${name}`, {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        ...(process.env.GITHUB_TOKEN && {
-          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
-        })
-      }
-    });
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return {
-          isValid: false,
-          repoInfo: null,
-          error: "Repository not found"
-        };
-      }
-      return {
-        isValid: false,
-        repoInfo: null,
-        error: `GitHub API error: ${response.status}`
-      };
-    }
+    const octokit = new Octokit({ auth: token });
+    await octokit.rest.repos.get({ owner, repo: name });
 
     return {
       isValid: true,
@@ -480,6 +776,21 @@ export async function quickRepoCheck(repoUrl: string): Promise<{
       }
     };
   } catch (error) {
+    if (error instanceof Error && 'status' in error) {
+      const status = (error as { status: number }).status;
+      if (status === 404) {
+        return {
+          isValid: false,
+          repoInfo: null,
+          error: "Repository not found"
+        };
+      }
+      return {
+        isValid: false,
+        repoInfo: null,
+        error: `GitHub API error: ${status}`
+      };
+    }
     return {
       isValid: false,
       repoInfo: null,

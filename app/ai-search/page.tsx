@@ -23,10 +23,11 @@ import {
   ChevronDown,
   Clock,
   ArrowDown,
+  Flame,
 } from "lucide-react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { SiteHeader } from "@/components/site-header";
-import { GitSignalLogoWave } from "@/components/gitsignal-logo";
+import { GitRadarLogoWave, GitRoastLogo } from "@/components/gitradar-logo";
 import Link from "next/link";
 import { DefaultChatTransport } from "ai";
 import ReactMarkdown from "react-markdown";
@@ -34,9 +35,9 @@ import { createClient } from "@/lib/supabase/client";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 import { EmailDraft } from "@/components/email-draft";
-import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton } from "@/components/repo-analysis-card";
+import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress } from "@/components/repo-analysis-card";
 import { motion, AnimatePresence } from "framer-motion";
-import type { RepoAnalysis } from "@/lib/actions/repo-analyze";
+import type { RepoAnalysis, AnalysisProgress } from "@/lib/actions/repo-analyze";
 
 // Types for message parts
 interface TextPart {
@@ -51,6 +52,7 @@ interface ToolPart {
   input?: Record<string, unknown>;
   result?: unknown;
   output?: unknown; // AI SDK v4 uses 'output' for tool results
+  preliminary?: boolean; // True when this is a streaming/preliminary result
 }
 
 interface StepStartPart {
@@ -171,6 +173,7 @@ function AISearchContent() {
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
   const [user, setUser] = useState<SupabaseUser | null>(null);
+  const roastMode = searchParams.get("roast") === "true";
   const isDev = process.env.NODE_ENV === "development";
 
   // Fetch user on mount
@@ -202,6 +205,7 @@ function AISearchContent() {
   const { messages, status, sendMessage } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
+      body: { roastMode },
     }),
   });
 
@@ -550,14 +554,39 @@ function AISearchContent() {
     }
 
     if (toolName === "analyzeGitHubRepository") {
-      const data = result as RepoAnalysis | { error: string; repoUrl: string };
+      // The result can be either:
+      // 1. An AnalysisProgress object (with status, result, etc.) - this is what the streaming returns
+      // 2. A direct RepoAnalysis object
+      // 3. An error object
+      const data = result as AnalysisProgress | RepoAnalysis | { error: string; repoUrl: string };
 
       // Check if it's an error response
-      if ("error" in data && data.error) {
-        return <RepoAnalysisError error={data.error} repoUrl={data.repoUrl || ""} />;
+      if ("error" in data && data.error && !("status" in data)) {
+        return <RepoAnalysisError error={data.error} repoUrl={(data as { error: string; repoUrl: string }).repoUrl || ""} />;
       }
 
-      // It's a successful analysis
+      // Check if it's an AnalysisProgress wrapper (has status and result fields)
+      if ("status" in data && "result" in data) {
+        const progressData = data as AnalysisProgress;
+
+        // If there's an error in the progress
+        if (progressData.status === "error") {
+          return <RepoAnalysisError
+            error={progressData.error || progressData.message}
+            repoUrl={`https://github.com/${progressData.repoOwner}/${progressData.repoName}`}
+          />;
+        }
+
+        // Extract the actual RepoAnalysis from the result
+        if (progressData.result) {
+          return <RepoAnalysisCard analysis={progressData.result} />;
+        }
+
+        // Fallback: show skeleton if result is missing
+        return <RepoAnalysisSkeleton />;
+      }
+
+      // It's a direct RepoAnalysis object
       return <RepoAnalysisCard analysis={data as RepoAnalysis} />;
     }
 
@@ -565,12 +594,22 @@ function AISearchContent() {
   };
 
   return (
-    <div className="relative h-screen flex flex-col bg-background overflow-hidden">
+    <div className={`relative h-screen flex flex-col overflow-hidden transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
       {/* Background effects */}
       <div className="fixed inset-0 grid-bg" />
       <div className="fixed inset-0 noise-overlay pointer-events-none" />
-      <div className="fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-emerald-600/20 animate-pulse-glow blur-3xl" />
-      <div className="fixed top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full bg-cyan-500/15 animate-pulse-glow blur-3xl delay-200" />
+
+      {/* Normal mode orbs */}
+      <div className={`fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'bg-red-600/30 animate-pulse' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
+      <div className={`fixed top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'bg-orange-500/25 animate-pulse' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
+
+      {/* Extra fire orbs for roast mode */}
+      {roastMode && (
+        <>
+          <div className="fixed bottom-[-10%] left-[20%] w-[400px] h-[400px] rounded-full bg-yellow-500/20 animate-pulse blur-3xl" />
+          <div className="fixed top-[40%] left-[50%] w-[300px] h-[300px] rounded-full bg-red-500/15 animate-bounce blur-3xl" style={{ animationDuration: '3s' }} />
+        </>
+      )}
 
       {/* Header */}
       <SiteHeader
@@ -579,13 +618,14 @@ function AISearchContent() {
         ]}
         showSignIn
         user={user}
+        roastMode={roastMode}
       />
 
       {/* Main Chat Area */}
-      <main className="relative z-10 flex-1 flex flex-col container mx-auto px-4 md:px-6 pt-8 pb-4 max-w-4xl min-h-0">
+      <main className="relative z-10 flex-1 flex flex-col min-h-0">
         {/* Messages */}
         <StickToBottom className="flex-1 relative mb-4 overflow-auto" resize="smooth" initial="smooth">
-          <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+          <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent container mx-auto px-4 md:px-6 pt-8 max-w-4xl">
           {messages.length === 0 && (
             <div className="text-center py-16">
               <motion.div
@@ -593,23 +633,46 @@ function AISearchContent() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.5, ease: "easeOut" }}
               >
-                <GitSignalLogoWave className="h-16 w-16 mx-auto mb-4 text-emerald-400/50" />
+                {roastMode ? (
+                  <div className="relative">
+                    <GitRoastLogo className="h-16 w-16 mx-auto mb-4 animate-pulse" />
+                    <motion.span
+                      animate={{ y: [0, -5, 0] }}
+                      transition={{ duration: 0.5, repeat: Infinity }}
+                      className="absolute -top-2 -right-2 text-2xl"
+                    >
+                      🔥
+                    </motion.span>
+                  </div>
+                ) : (
+                  <GitRadarLogoWave className="h-16 w-16 mx-auto mb-4 text-emerald-400/50" />
+                )}
               </motion.div>
               <motion.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.2 }}
-                className="text-muted-foreground mb-6"
+                className={`mb-6 ${roastMode ? 'text-red-400/80' : 'text-muted-foreground'}`}
               >
-                Ask me to find developers with specific skills, in certain locations, or working on particular technologies.
+                {roastMode
+                  ? "Ready to absolutely demolish some GitHub profiles? Let's see who's been committing crimes against code. 💀"
+                  : "Ask me to find developers with specific skills, in certain locations, or working on particular technologies."}
               </motion.p>
               <div className="flex flex-wrap justify-center gap-2">
-                {[
-                  "Find Rust developers in Sydney",
-                  "Top React engineers on GitHub",
-                  "Machine learning experts in Europe",
-                  "Go developers with Kubernetes experience",
-                ].map((suggestion, index) => (
+                {(roastMode
+                  ? [
+                      "Roast torvalds' GitHub 🔥",
+                      "Destroy my own profile",
+                      "Find devs to roast in Silicon Valley",
+                      "Who has the worst commit messages?",
+                    ]
+                  : [
+                      "Find Rust developers in Sydney",
+                      "Top React engineers on GitHub",
+                      "Machine learning experts in Europe",
+                      "Go developers with Kubernetes experience",
+                    ]
+                ).map((suggestion, index) => (
                   <motion.button
                     key={suggestion}
                     initial={{ opacity: 0, y: 15 }}
@@ -618,7 +681,11 @@ function AISearchContent() {
                     onClick={() => {
                       setInputValue(suggestion);
                     }}
-                    className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-sm text-muted-foreground hover:bg-white/10 hover:text-white transition-colors"
+                    className={`px-4 py-2 rounded-full border text-sm transition-colors ${
+                      roastMode
+                        ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                        : 'bg-white/5 border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white'
+                    }`}
                   >
                     {suggestion}
                   </motion.button>
@@ -723,13 +790,21 @@ function AISearchContent() {
                         const hasResult = toolPart.state === "result" || toolPart.state === "output-available";
                         const toolResult = toolPart.output ?? toolPart.result;
 
+                        // For analyzeGitHubRepository, check preliminary FIRST before hasResult
+                        const isPreliminary = toolName === "analyzeGitHubRepository" && toolPart.preliminary;
+                        const showFinalResult = hasResult && !isPreliminary;
+
                         return (
                           <div key={`tool-${i}`} className="space-y-2">
-                            {hasResult ? (
+                            {isPreliminary && toolResult ? (
+                              // Show streaming progress for repo analysis
+                              <RepoAnalysisProgress progress={toolResult as AnalysisProgress} />
+                            ) : showFinalResult ? (
                               <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository"}>
                                 {toolResult != null && renderToolResult(toolName, toolResult)}
                               </CollapsibleToolResult>
                             ) : toolName === "analyzeGitHubRepository" ? (
+                              // Fallback skeleton for repo analysis
                               <RepoAnalysisSkeleton />
                             ) : (
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -756,7 +831,35 @@ function AISearchContent() {
                         return (
                           <div key={`text-${i}`} className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
                             <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
-                              <ReactMarkdown>{textPart.text}</ReactMarkdown>
+                              <ReactMarkdown
+                                components={{
+                                  table: ({ children }) => (
+                                    <div className="overflow-x-auto my-4">
+                                      <table className="w-full border-collapse border border-white/20 text-sm">
+                                        {children}
+                                      </table>
+                                    </div>
+                                  ),
+                                  thead: ({ children }) => (
+                                    <thead className="bg-white/10">{children}</thead>
+                                  ),
+                                  th: ({ children }) => (
+                                    <th className="border border-white/20 px-3 py-2 text-left font-semibold text-white">
+                                      {children}
+                                    </th>
+                                  ),
+                                  td: ({ children }) => (
+                                    <td className="border border-white/20 px-3 py-2 text-white/90">
+                                      {children}
+                                    </td>
+                                  ),
+                                  tr: ({ children }) => (
+                                    <tr className="hover:bg-white/5 transition-colors">{children}</tr>
+                                  ),
+                                }}
+                              >
+                                {textPart.text}
+                              </ReactMarkdown>
                             </div>
                           </div>
                         );
@@ -789,9 +892,6 @@ function AISearchContent() {
               transition={{ duration: 0.25 }}
               className="flex gap-3"
             >
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
-                <Brain className="h-4 w-4 text-white" />
-              </div>
               <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
                 <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
               </div>
@@ -809,23 +909,35 @@ function AISearchContent() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.2 }}
-          className="sticky bottom-4 bg-background/80 backdrop-blur-xl rounded-2xl border border-white/10 p-2"
+          className={`sticky bottom-4 backdrop-blur-xl rounded-2xl border p-2 transition-all duration-500 container mx-auto px-4 md:px-6 max-w-4xl ${
+            roastMode
+              ? 'bg-zinc-900/90 border-red-500/30 shadow-lg shadow-red-500/10'
+              : 'bg-background/80 border-white/10'
+          }`}
         >
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <Input
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Ask me to find developers..."
-              className="flex-1 h-12 bg-transparent border-0 focus:ring-0 focus-visible:ring-0 text-white placeholder:text-muted-foreground"
+              placeholder={roastMode ? "Who's getting roasted today? 🔥" : "Ask me to find developers..."}
+              className={`flex-1 h-12 bg-transparent border-0 focus:ring-0 focus-visible:ring-0 text-white transition-colors duration-300 ${
+                roastMode ? 'placeholder:text-red-400/60' : 'placeholder:text-muted-foreground'
+              }`}
               disabled={isLoading}
             />
             <Button
               type="submit"
               disabled={isLoading || !inputValue.trim()}
-              className="h-12 px-6 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500"
+              className={`h-12 px-6 transition-all duration-300 ${
+                roastMode
+                  ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400'
+                  : 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500'
+              }`}
             >
               {isLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
+              ) : roastMode ? (
+                <Flame className="h-5 w-5" />
               ) : (
                 <Send className="h-5 w-5" />
               )}
