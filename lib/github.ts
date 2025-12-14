@@ -3,6 +3,7 @@ import { profiles } from "@/src/db/schema";
 import { eq } from "drizzle-orm";
 import type { User } from "@supabase/supabase-js";
 import { getCached, setCache } from "./redis";
+import { Octokit } from "octokit";
 
 interface GitHubUser {
   id: number;
@@ -26,6 +27,10 @@ interface GitHubRepo {
   size: number;
 }
 
+function createOctokit(token: string) {
+  return new Octokit({ auth: token });
+}
+
 export async function fetchGitHubUser(token: string): Promise<GitHubUser> {
   const cacheKey = `github:user:${token.slice(-8)}`;
   const cached = await getCached<GitHubUser>(cacheKey);
@@ -33,18 +38,24 @@ export async function fetchGitHubUser(token: string): Promise<GitHubUser> {
     return cached;
   }
 
-  const response = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github.v3+json",
-    },
-  });
+  const octokit = createOctokit(token);
+  const { data } = await octokit.rest.users.getAuthenticated();
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch GitHub user");
-  }
+  const user: GitHubUser = {
+    id: data.id,
+    login: data.login,
+    name: data.name ?? null,
+    email: data.email ?? null,
+    bio: data.bio ?? null,
+    avatar_url: data.avatar_url,
+    location: data.location ?? null,
+    blog: data.blog ?? null,
+    company: data.company ?? null,
+    public_repos: data.public_repos,
+    followers: data.followers,
+    following: data.following,
+  };
 
-  const user = await response.json();
   await setCache(cacheKey, user);
   return user;
 }
@@ -59,23 +70,26 @@ export async function fetchGitHubRepos(
     return cached;
   }
 
-  const response = await fetch(
-    `https://api.github.com/users/${username}/repos?per_page=100&sort=pushed`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
-  );
+  try {
+    const octokit = createOctokit(token);
+    const { data } = await octokit.rest.repos.listForUser({
+      username,
+      per_page: 100,
+      sort: "pushed",
+    });
 
-  if (!response.ok) {
+    const repos: GitHubRepo[] = data.map((repo) => ({
+      name: repo.name,
+      language: repo.language ?? null,
+      stargazers_count: repo.stargazers_count ?? 0,
+      size: repo.size ?? 0,
+    }));
+
+    await setCache(cacheKey, repos);
+    return repos;
+  } catch {
     return [];
   }
-
-  const repos = await response.json();
-  await setCache(cacheKey, repos);
-  return repos;
 }
 
 export function calculateTopLanguages(
