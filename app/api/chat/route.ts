@@ -5,6 +5,7 @@ import { calculateTopLanguages } from "@/lib/github";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/src/db";
 import { searchHistory } from "@/src/db/schema";
+import { analyzeRepository, quickRepoCheck, type RepoAnalysis } from "@/lib/actions/repo-analyze";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
@@ -791,13 +792,19 @@ You have access to these tools:
 
 4. **getTopCandidates**: Rank and score multiple GitHub profiles against a hiring brief. This displays a rich UI card for each candidate showing their score, match reasons, concerns, languages, and top repos.
 
-**General web tools:**
-5. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+5. **analyzeGitHubRepository**: Deep analysis of a specific GitHub repository. Clones the repo into a sandboxed environment and analyzes code quality, git practices, testing, documentation, and technical complexity. Use this when:
+   - A user provides a specific repo URL to analyze
+   - You want to evaluate actual code quality (not just profile stats)
+   - Assessing technical professionalism of a candidate's work
+   - NOTE: This takes 1-3 minutes to run as it performs deep analysis.
 
-6. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
+**General web tools:**
+6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+
+7. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
 **Outreach tools:**
-7. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool returns an editable email draft that the user can customize before sending.
+8. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool returns an editable email draft that the user can customize before sending.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
@@ -814,6 +821,12 @@ Workflow for finding developers:
 For single profile analysis:
 - Use analyzeGitHubProfile - the tool renders a detailed profile card
 - Do NOT summarize the profile in text after the tool call
+
+For repository deep-dive analysis:
+- When user provides a GitHub repo URL (e.g., "analyze https://github.com/user/repo"), use analyzeGitHubRepository
+- Warn the user it takes 1-3 minutes before starting
+- The tool renders a comprehensive analysis card with skill level, code quality, and professionalism metrics
+- Do NOT repeat the analysis in text after the tool call
 
 For additional research on candidates:
 - Use webSearch to find their LinkedIn, personal sites, blog posts, talks, etc.
@@ -947,6 +960,51 @@ ${senderSignature}`;
             role,
             companyName,
           };
+        },
+      }),
+      analyzeGitHubRepository: tool({
+        description: `Perform a deep analysis of a GitHub repository to assess the developer's skill level and professionalism. This tool clones the repo into a sandboxed environment and uses AI to analyze:
+- Code quality and organization
+- Git practices (commit messages, branching)
+- Testing and CI/CD setup
+- Documentation quality
+- Technical complexity
+- Skill indicators (positive and negative signals)
+
+Use this when you want to deeply evaluate a candidate's actual code quality, not just their GitHub profile stats. This is especially useful when:
+- A candidate has a portfolio repo they want reviewed
+- You want to assess code quality beyond star counts
+- You need to evaluate technical professionalism
+- The user provides a specific repo URL to analyze
+
+NOTE: This analysis takes 1-3 minutes as it runs in a sandboxed environment.`,
+        inputSchema: z.object({
+          repoUrl: z.string().describe("The GitHub repository URL to analyze, e.g. 'https://github.com/owner/repo'"),
+          hiringBrief: z.string().optional().describe("Optional context about what role/skills you're hiring for, to contextualize the analysis"),
+        }),
+        execute: async ({ repoUrl, hiringBrief }): Promise<RepoAnalysis | { error: string; repoUrl: string }> => {
+          try {
+            // First do a quick check if the repo exists
+            const check = await quickRepoCheck(repoUrl);
+            if (!check.isValid) {
+              return { error: check.error || "Invalid repository", repoUrl };
+            }
+
+            // Run the full analysis
+            const analysis = await analyzeRepository({
+              repoUrl,
+              hiringBrief,
+              timeout: "5m",
+              vcpus: 2,
+            });
+
+            return analysis;
+          } catch (error) {
+            return {
+              error: `Analysis failed: ${error instanceof Error ? error.message : String(error)}`,
+              repoUrl,
+            };
+          }
         },
       }),
     },

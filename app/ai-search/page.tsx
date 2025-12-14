@@ -34,7 +34,9 @@ import { createClient } from "@/lib/supabase/client";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 import { EmailDraft } from "@/components/email-draft";
+import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton } from "@/components/repo-analysis-card";
 import { motion, AnimatePresence } from "framer-motion";
+import type { RepoAnalysis } from "@/lib/actions/repo-analyze";
 
 // Types for message parts
 interface TextPart {
@@ -131,6 +133,8 @@ function CollapsibleToolResult({
         return "Reviewed Candidates";
       case "generateDraftEmail":
         return "Email Draft";
+      case "analyzeGitHubRepository":
+        return "Repository Analysis";
       default:
         return "Tool Result";
     }
@@ -545,6 +549,18 @@ function AISearchContent() {
       return <EmailDraft data={data} />;
     }
 
+    if (toolName === "analyzeGitHubRepository") {
+      const data = result as RepoAnalysis | { error: string; repoUrl: string };
+
+      // Check if it's an error response
+      if ("error" in data && data.error) {
+        return <RepoAnalysisError error={data.error} repoUrl={data.repoUrl || ""} />;
+      }
+
+      // It's a successful analysis
+      return <RepoAnalysisCard analysis={data as RepoAnalysis} />;
+    }
+
     return null;
   };
 
@@ -710,9 +726,11 @@ function AISearchContent() {
                         return (
                           <div key={`tool-${i}`} className="space-y-2">
                             {hasResult ? (
-                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail"}>
+                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository"}>
                                 {toolResult != null && renderToolResult(toolName, toolResult)}
                               </CollapsibleToolResult>
+                            ) : toolName === "analyzeGitHubRepository" ? (
+                              <RepoAnalysisSkeleton />
                             ) : (
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <Loader2 className="h-3 w-3 animate-spin" />
