@@ -76,8 +76,18 @@ export interface Collaborator {
   connectedVia?: string; // For 2nd degree, who they're connected through
 }
 
+export interface RepoNode {
+  name: string;
+  full_name: string;
+  description: string | null;
+  stars: number;
+  language: string | null;
+  owner: string;
+}
+
 export interface CollaborationData {
   collaborators: Collaborator[];
+  repos: RepoNode[];
   organizations: Array<{
     login: string;
     avatar_url: string;
@@ -86,7 +96,7 @@ export interface CollaborationData {
   connections: Array<{
     source: string;
     target: string;
-    type: "org" | "contributor" | "following" | "follower" | "mutual";
+    type: "org" | "contributor" | "repo";
   }>;
 }
 
@@ -328,9 +338,10 @@ async function fetchCollaborationData(
   token: string | null
 ): Promise<CollaborationData> {
   const collaborators: Collaborator[] = [];
+  const repoNodes: RepoNode[] = [];
   const connections: CollaborationData["connections"] = [];
   const seenUsers = new Set<string>();
-  const firstDegreeUsers: Array<{ login: string; avatar_url: string; type: Collaborator["type"] }> = [];
+  const seenRepos = new Set<string>();
   seenUsers.add(username.toLowerCase());
 
   // Fetch organizations
@@ -360,88 +371,76 @@ async function fetchCollaborationData(
         target: org.login,
         type: "org",
       });
-      firstDegreeUsers.push({ login: org.login, avatar_url: org.avatar_url, type: "org" });
     }
   }
 
-  // Fetch followers/following first to build 1st degree network
-  let followers: Array<{ login: string; avatar_url: string }> = [];
-  let following: Array<{ login: string; avatar_url: string }> = [];
+  // Focus on repos with contributors - this is the main network
+  // Get repos sorted by activity and stars
+  const activeRepos = repos
+    .filter(r => !r.fork)
+    .sort((a, b) => {
+      const aScore = a.stargazers_count * 2 + a.forks_count;
+      const bScore = b.stargazers_count * 2 + b.forks_count;
+      return bScore - aScore;
+    })
+    .slice(0, 6);
 
-  try {
-    [followers, following] = await Promise.all([
-      fetchGitHub<Array<{ login: string; avatar_url: string }>>(
-        `/users/${username}/followers?per_page=15`,
-        token
-      ),
-      fetchGitHub<Array<{ login: string; avatar_url: string }>>(
-        `/users/${username}/following?per_page=15`,
-        token
-      ),
-    ]);
-
-    const followerLogins = new Set(followers.map(f => f.login.toLowerCase()));
-
-    // Add following as 1st degree
-    for (const user of following.slice(0, 10)) {
-      if (!seenUsers.has(user.login.toLowerCase())) {
-        seenUsers.add(user.login.toLowerCase());
-        const isMutual = followerLogins.has(user.login.toLowerCase());
-        collaborators.push({
-          login: user.login,
-          avatar_url: user.avatar_url,
-          type: "following",
-          relationship: isMutual ? "Mutual connection" : "Following",
-          degree: 1,
-        });
-        connections.push({
-          source: username,
-          target: user.login,
-          type: isMutual ? "mutual" : "following",
-        });
-        firstDegreeUsers.push({ login: user.login, avatar_url: user.avatar_url, type: "following" });
-      }
-    }
-
-    // Add followers as 1st degree
-    for (const user of followers.slice(0, 8)) {
-      if (!seenUsers.has(user.login.toLowerCase())) {
-        seenUsers.add(user.login.toLowerCase());
-        collaborators.push({
-          login: user.login,
-          avatar_url: user.avatar_url,
-          type: "follower",
-          relationship: "Follower",
-          degree: 1,
-        });
-        connections.push({
-          source: user.login,
-          target: username,
-          type: "follower",
-        });
-        firstDegreeUsers.push({ login: user.login, avatar_url: user.avatar_url, type: "follower" });
-      }
-    }
-  } catch {
-    // Skip if we can't fetch followers/following
-  }
-
-  // Fetch contributors from top repos as 1st degree
-  const topRepos = repos
-    .filter(r => !r.fork && r.stargazers_count > 0)
-    .sort((a, b) => b.stargazers_count - a.stargazers_count)
-    .slice(0, 3);
-
-  for (const repo of topRepos) {
+  // Fetch contributors from repos in parallel
+  const contributorPromises = activeRepos.map(async (repo) => {
     try {
       const contributors = await fetchGitHub<Array<{ login: string; avatar_url: string; contributions: number }>>(
-        `/repos/${repo.full_name}/contributors?per_page=5`,
+        `/repos/${repo.full_name}/contributors?per_page=8`,
         token
       );
+      return { repo, contributors };
+    } catch {
+      return { repo, contributors: [] };
+    }
+  });
 
-      for (const contributor of contributors) {
-        if (!seenUsers.has(contributor.login.toLowerCase()) && contributor.contributions > 1) {
-          seenUsers.add(contributor.login.toLowerCase());
+  const repoContributors = await Promise.all(contributorPromises);
+
+  // Process repos and their contributors
+  for (const { repo, contributors } of repoContributors) {
+    // Filter out the owner from contributors
+    const otherContributors = contributors.filter(
+      c => c.login.toLowerCase() !== username.toLowerCase() && c.contributions >= 1
+    );
+
+    // Only add repo if it has other contributors
+    if (otherContributors.length > 0 && !seenRepos.has(repo.full_name.toLowerCase())) {
+      seenRepos.add(repo.full_name.toLowerCase());
+
+      // Add repo as a node
+      repoNodes.push({
+        name: repo.name,
+        full_name: repo.full_name,
+        description: repo.description,
+        stars: repo.stargazers_count,
+        language: repo.language,
+        owner: username,
+      });
+
+      // Connect user to repo
+      connections.push({
+        source: username,
+        target: `repo:${repo.full_name}`,
+        type: "repo",
+      });
+
+      // Add contributors and connect them to repo
+      for (const contributor of otherContributors.slice(0, 5)) {
+        const lowerLogin = contributor.login.toLowerCase();
+
+        // Connect contributor to repo
+        connections.push({
+          source: `repo:${repo.full_name}`,
+          target: contributor.login,
+          type: "contributor",
+        });
+
+        if (!seenUsers.has(lowerLogin)) {
+          seenUsers.add(lowerLogin);
           collaborators.push({
             login: contributor.login,
             avatar_url: contributor.avatar_url,
@@ -450,66 +449,14 @@ async function fetchCollaborationData(
             repoName: repo.name,
             degree: 1,
           });
-          connections.push({
-            source: username,
-            target: contributor.login,
-            type: "contributor",
-          });
-          firstDegreeUsers.push({ login: contributor.login, avatar_url: contributor.avatar_url, type: "contributor" });
         }
       }
-    } catch {
-      // Skip if we can't fetch contributors
     }
-  }
-
-  // Now fetch 2nd degree connections (connections of our 1st degree connections)
-  // Limit to a few key 1st degree users to avoid rate limits
-  const keyFirstDegree = firstDegreeUsers
-    .filter(u => u.type === "following" || u.type === "contributor")
-    .slice(0, 4);
-
-  for (const firstDegree of keyFirstDegree) {
-    try {
-      // Get who this 1st degree connection follows
-      const theirFollowing = await fetchGitHub<Array<{ login: string; avatar_url: string }>>(
-        `/users/${firstDegree.login}/following?per_page=5`,
-        token
-      );
-
-      for (const secondDegree of theirFollowing.slice(0, 3)) {
-        // Add connection between 1st and 2nd degree
-        if (secondDegree.login.toLowerCase() !== username.toLowerCase()) {
-          connections.push({
-            source: firstDegree.login,
-            target: secondDegree.login,
-            type: "following",
-          });
-
-          // Only add as collaborator if not already seen
-          if (!seenUsers.has(secondDegree.login.toLowerCase())) {
-            seenUsers.add(secondDegree.login.toLowerCase());
-            collaborators.push({
-              login: secondDegree.login,
-              avatar_url: secondDegree.avatar_url,
-              type: "following",
-              relationship: `Connected via ${firstDegree.login}`,
-              degree: 2,
-              connectedVia: firstDegree.login,
-            });
-          }
-        }
-      }
-    } catch {
-      // Skip on error
-    }
-
-    // Stop if we have enough 2nd degree connections
-    if (collaborators.filter(c => c.degree === 2).length >= 12) break;
   }
 
   return {
     collaborators,
+    repos: repoNodes,
     organizations,
     connections,
   };
@@ -609,4 +556,23 @@ export async function analyzeGitHubProfile(username: string): Promise<AnalysisRe
       recommendation,
     },
   };
+}
+
+// Lightweight function to fetch just collaboration data for network graph navigation
+export async function fetchUserCollaboration(username: string): Promise<{
+  profile: GitHubProfile;
+  collaboration: CollaborationData;
+}> {
+  const token = await getGitHubToken();
+
+  // Fetch profile and repos in parallel
+  const [profile, repos] = await Promise.all([
+    fetchGitHub<GitHubProfile>(`/users/${username}`, token),
+    fetchGitHub<GitHubRepo[]>(`/users/${username}/repos?per_page=50&sort=updated`, token),
+  ]);
+
+  // Fetch collaboration data
+  const collaboration = await fetchCollaborationData(username, repos, token);
+
+  return { profile, collaboration };
 }

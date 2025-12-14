@@ -1,21 +1,20 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { analyzeGitHubProfile } from "@/lib/actions/github-analyze";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  BarChart3,
-  ArrowLeft,
   Users,
   Building2,
   GitFork,
-  UserPlus,
-  UserCheck,
+  Star,
+  MapPin,
+  Calendar,
   Loader2,
   ExternalLink,
 } from "lucide-react";
 import { ExpandedCollaborationGraph } from "@/components/expanded-collaboration-graph";
+import { SiteHeader } from "@/components/site-header";
 
 interface PageProps {
   params: Promise<{ username: string }>;
@@ -23,27 +22,17 @@ interface PageProps {
 
 function NetworkSkeleton() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen w-screen bg-background overflow-hidden flex flex-col">
       <div className="fixed inset-0 grid-bg" />
       <div className="fixed inset-0 noise-overlay pointer-events-none" />
 
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
-            <BarChart3 className="h-6 w-6 text-emerald-400" />
-            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
-            </span>
-          </Link>
-        </div>
-      </header>
+      {/* Header skeleton */}
+      <SiteHeader compact rightLabel="Collaboration Network" />
 
-      <main className="relative z-10 container mx-auto px-4 md:px-6 py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
-          <p className="text-lg text-muted-foreground">Loading collaboration network...</p>
-        </div>
-      </main>
+      <div className="flex-1 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
+        <p className="text-lg text-muted-foreground">Loading collaboration network...</p>
+      </div>
     </div>
   );
 }
@@ -60,166 +49,210 @@ async function NetworkContent({ username }: { username: string }) {
     throw error;
   }
 
-  const { profile, collaboration } = result;
+  const { profile, collaboration, analysis } = result;
 
-  // Count by type
-  const orgCount = collaboration.collaborators.filter(c => c.type === "org").length;
+  // Count contributors and repos
   const contributorCount = collaboration.collaborators.filter(c => c.type === "contributor").length;
-  const followingCount = collaboration.collaborators.filter(c => c.type === "following").length;
-  const followerCount = collaboration.collaborators.filter(c => c.type === "follower").length;
+  const repoCount = collaboration.repos.length;
+  const orgCount = collaboration.organizations.length;
+
+  // Format account age
+  const accountAge = analysis.accountAge;
+  const accountAgeText = accountAge >= 1 ? `${Math.floor(accountAge)} years` : `${Math.round(accountAge * 12)} months`;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen w-screen bg-background overflow-hidden relative flex flex-col">
       <div className="fixed inset-0 grid-bg" />
       <div className="fixed inset-0 noise-overlay pointer-events-none" />
 
       {/* Background orbs */}
-      <div className="fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-purple-600/10 blur-3xl" />
-      <div className="fixed bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-purple-600/10 blur-3xl pointer-events-none" />
+      <div className="fixed bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-3xl pointer-events-none" />
 
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
-            <div className="relative">
-              <BarChart3 className="h-6 w-6 text-emerald-400 transition-transform group-hover:scale-110" />
-            </div>
-            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
-            </span>
-          </Link>
-          <Button variant="outline" asChild>
-            <a
-              href={`https://github.com/${profile.login}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              View on GitHub
-              <ExternalLink className="ml-2 h-4 w-4" />
-            </a>
-          </Button>
-        </div>
-      </header>
+      {/* Main Header */}
+      <SiteHeader
+        compact
+        backLink={{ href: `/analyze/${username}`, label: "Back to analysis" }}
+        rightLabel="Collaboration Network"
+        externalLink={{ href: `https://github.com/${profile.login}`, label: "GitHub" }}
+      />
 
-      <main className="relative z-10 container mx-auto px-4 md:px-6 py-8">
-        {/* Back button */}
-        <Link
-          href={`/analyze/${username}`}
-          className="inline-flex items-center gap-2 text-muted-foreground hover:text-white transition-colors mb-6"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to profile analysis
-        </Link>
-
-        {/* Page Header */}
-        <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6">
-          <div className="flex items-center gap-4">
-            <img
-              src={profile.avatar_url}
-              alt={profile.login}
-              className="w-16 h-16 rounded-xl border border-white/10"
-            />
-            <div>
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Users className="h-6 w-6 text-purple-400" />
-                Collaboration Network
-              </h1>
-              <p className="text-muted-foreground">
-                @{profile.login}&apos;s professional connections on GitHub
-              </p>
+      {/* Floating Side Panel */}
+      <div className="absolute top-[4.5rem] left-4 z-50 w-80 max-h-[calc(100vh-5.5rem)] overflow-y-auto">
+        <div className="rounded-2xl border border-white/10 bg-background/90 backdrop-blur-xl shadow-2xl">
+          {/* User Profile */}
+          <div className="p-4 border-b border-white/5">
+            <div className="flex items-start gap-3">
+              <img
+                src={profile.avatar_url}
+                alt={profile.login}
+                className="w-14 h-14 rounded-xl border border-white/10"
+              />
+              <div className="flex-1 min-w-0">
+                <h1 className="text-lg font-bold text-white truncate">
+                  {profile.name || profile.login}
+                </h1>
+                <p className="text-sm text-muted-foreground">@{profile.login}</p>
+                {profile.bio && (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{profile.bio}</p>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center">
-            <Building2 className="h-5 w-5 text-purple-400 mx-auto mb-2" />
-            <div className="text-2xl font-bold text-white">{orgCount}</div>
-            <div className="text-xs text-muted-foreground">Organizations</div>
+          {/* User Details */}
+          <div className="p-4 border-b border-white/5 space-y-2">
+            {profile.location && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5" />
+                <span className="truncate">{profile.location}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Calendar className="h-3.5 w-3.5" />
+              <span>On GitHub for {accountAgeText}</span>
+            </div>
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-white font-medium">{profile.followers.toLocaleString()}</span>
+              <span className="text-muted-foreground">followers</span>
+              <span className="text-white font-medium">{profile.following.toLocaleString()}</span>
+              <span className="text-muted-foreground">following</span>
+            </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center">
-            <GitFork className="h-5 w-5 text-cyan-400 mx-auto mb-2" />
-            <div className="text-2xl font-bold text-white">{contributorCount}</div>
-            <div className="text-xs text-muted-foreground">Co-Contributors</div>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center">
-            <UserPlus className="h-5 w-5 text-blue-400 mx-auto mb-2" />
-            <div className="text-2xl font-bold text-white">{followingCount}</div>
-            <div className="text-xs text-muted-foreground">Following</div>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center">
-            <UserCheck className="h-5 w-5 text-gray-400 mx-auto mb-2" />
-            <div className="text-2xl font-bold text-white">{followerCount}</div>
-            <div className="text-xs text-muted-foreground">Followers</div>
-          </div>
-        </div>
 
-        {/* Full-page Graph */}
-        <ExpandedCollaborationGraph profile={profile} collaboration={collaboration} />
+          {/* Network Stats */}
+          <div className="p-4 border-b border-white/5">
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+              Network Overview
+            </h2>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+                <GitFork className="h-4 w-4 text-amber-400 mx-auto mb-1" />
+                <div className="text-lg font-bold text-white">{repoCount}</div>
+                <div className="text-[10px] text-muted-foreground">Repos</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+                <Users className="h-4 w-4 text-cyan-400 mx-auto mb-1" />
+                <div className="text-lg font-bold text-white">{contributorCount}</div>
+                <div className="text-[10px] text-muted-foreground">Contributors</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+                <Building2 className="h-4 w-4 text-purple-400 mx-auto mb-1" />
+                <div className="text-lg font-bold text-white">{orgCount}</div>
+                <div className="text-[10px] text-muted-foreground">Orgs</div>
+              </div>
+            </div>
+          </div>
 
-        {/* Connection List */}
-        <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.02] p-6">
-          <h2 className="text-lg font-semibold mb-4">All Connections</h2>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {collaboration.collaborators.map((collab) => (
+          {/* Top Languages */}
+          {analysis.languages.length > 0 && (
+            <div className="p-4 border-b border-white/5">
+              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                Top Languages
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {analysis.languages.slice(0, 5).map((lang) => (
+                  <Badge
+                    key={lang.name}
+                    variant="outline"
+                    className="text-xs border-white/10 bg-white/[0.02]"
+                  >
+                    {lang.name}
+                    <span className="ml-1 text-muted-foreground">{lang.percentage}%</span>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Organizations */}
+          {collaboration.organizations.length > 0 && (
+            <div className="p-4 border-b border-white/5">
+              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                Organizations
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {collaboration.organizations.slice(0, 6).map((org) => (
+                  <a
+                    key={org.login}
+                    href={`https://github.com/${org.login}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group"
+                    title={org.login}
+                  >
+                    <img
+                      src={org.avatar_url}
+                      alt={org.login}
+                      className="w-8 h-8 rounded-lg border border-purple-500/30 transition-all group-hover:border-purple-400 group-hover:scale-110"
+                    />
+                  </a>
+                ))}
+                {collaboration.organizations.length > 6 && (
+                  <div className="w-8 h-8 rounded-lg border border-purple-500/20 bg-purple-500/10 flex items-center justify-center text-xs text-purple-300">
+                    +{collaboration.organizations.length - 6}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Top Repos */}
+          {analysis.topRepos.length > 0 && (
+            <div className="p-4">
+              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                Top Repositories
+              </h2>
+              <div className="space-y-2">
+                {analysis.topRepos.slice(0, 4).map((repo) => (
+                  <a
+                    key={repo.id}
+                    href={repo.html_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block p-2 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/10 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-medium text-white truncate">{repo.name}</span>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0">
+                        <Star className="h-3 w-3 text-yellow-400" />
+                        {repo.stargazers_count}
+                      </div>
+                    </div>
+                    {repo.description && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{repo.description}</p>
+                    )}
+                    {repo.language && (
+                      <span className="inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-muted-foreground">
+                        {repo.language}
+                      </span>
+                    )}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* View on GitHub button */}
+          <div className="p-4 pt-0">
+            <Button variant="outline" className="w-full" asChild>
               <a
-                key={collab.login}
-                href={`https://github.com/${collab.login}`}
+                href={`https://github.com/${profile.login}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/10 transition-all"
               >
-                <img
-                  src={collab.avatar_url}
-                  alt={collab.login}
-                  className="w-10 h-10 rounded-full border border-white/10"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-white truncate">{collab.login}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {collab.relationship}
-                  </div>
-                </div>
-                <Badge
-                  variant="outline"
-                  className={
-                    collab.type === "org"
-                      ? "border-purple-500/30 bg-purple-500/10 text-purple-300"
-                      : collab.type === "contributor"
-                      ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                      : collab.type === "following"
-                      ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
-                      : "border-gray-500/30 bg-gray-500/10 text-gray-300"
-                  }
-                >
-                  {collab.type === "org"
-                    ? "Org"
-                    : collab.type === "contributor"
-                    ? "Contributor"
-                    : collab.type === "following"
-                    ? "Following"
-                    : "Follower"}
-                </Badge>
+                View on GitHub
+                <ExternalLink className="ml-2 h-4 w-4" />
               </a>
-            ))}
+            </Button>
           </div>
         </div>
-      </main>
+      </div>
 
-      {/* Footer */}
-      <footer className="border-t border-white/5 py-8 mt-12">
-        <div className="container mx-auto px-4 md:px-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <BarChart3 className="h-4 w-4" />
-              <span>GitSignal</span>
-              <span className="mx-2">·</span>
-              <span>Developer insights for hiring managers</span>
-            </div>
-          </div>
-        </div>
-      </footer>
+      {/* Full-screen Graph */}
+      <div className="flex-1 relative z-10">
+        <ExpandedCollaborationGraph profile={profile} collaboration={collaboration} fullscreen />
+      </div>
     </div>
   );
 }
