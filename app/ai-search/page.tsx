@@ -31,16 +31,19 @@ interface TextPart {
   text: string;
 }
 
-interface ToolInvocationPart {
-  type: "tool-invocation";
-  toolInvocation: {
-    state: string;
-    toolName: string;
-    result?: unknown;
-  };
+interface ToolPart {
+  type: string; // "tool-searchGitHubProfiles", "tool-analyzeGitHubProfile", etc.
+  toolCallId: string;
+  state: "input-available" | "output-available" | "result";
+  input?: Record<string, unknown>;
+  result?: unknown;
 }
 
-type MessagePart = TextPart | ToolInvocationPart | { type: string };
+interface StepStartPart {
+  type: "step-start";
+}
+
+type MessagePart = TextPart | ToolPart | StepStartPart | { type: string };
 
 interface ChatMessage {
   id: string;
@@ -86,14 +89,19 @@ function AISearchContent() {
       .join("");
   };
 
-  // Helper to get tool invocations from message parts
-  const getToolInvocations = (message: ChatMessage): ToolInvocationPart[] => {
+  // Helper to get tool parts from message parts
+  const getToolParts = (message: ChatMessage): ToolPart[] => {
     return message.parts.filter(
-      (part): part is ToolInvocationPart => part.type === "tool-invocation"
+      (part): part is ToolPart => part.type.startsWith("tool-")
     );
   };
 
-  const renderToolResult = (toolName: string, result: unknown) => {
+  // Extract tool name from type (e.g., "tool-searchGitHubProfiles" -> "searchGitHubProfiles")
+  const getToolName = (toolType: string): string => {
+    return toolType.replace("tool-", "");
+  };
+
+  const renderToolResult = (toolName: string, result: unknown): React.ReactNode => {
     if (toolName === "searchGitHubProfiles") {
       const data = result as {
         query: string;
@@ -325,10 +333,6 @@ function AISearchContent() {
         showSignIn
       />
 
-      <pre>
-      {JSON.stringify(messages, null, 2)}
-      </pre>
-
       {/* Main Chat Area */}
       <main className="relative z-10 flex-1 flex flex-col container mx-auto px-4 md:px-6 pt-8 pb-4 max-w-4xl">
         {/* Header */}
@@ -397,33 +401,37 @@ function AISearchContent() {
                 ) : (
                   <>
                     {/* Tool invocations */}
-                    {getToolInvocations(message).map((part, i) => (
-                      <div key={i} className="space-y-2">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {part.toolInvocation.state === "result" ? (
-                            <>
-                              <Search className="h-3 w-3" />
-                              <span>
-                                {part.toolInvocation.toolName === "searchGitHubProfiles"
-                                  ? "Searched for profiles"
-                                  : "Analyzed profile"}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              <span>
-                                {part.toolInvocation.toolName === "searchGitHubProfiles"
-                                  ? "Searching for profiles..."
-                                  : "Analyzing profile..."}
-                              </span>
-                            </>
-                          )}
+                    {getToolParts(message).map((part, i) => {
+                      const toolName = getToolName(part.type);
+                      const hasResult = part.state === "result" || part.state === "output-available";
+
+                      return (
+                        <div key={i} className="space-y-2">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {hasResult ? (
+                              <>
+                                <Search className="h-3 w-3" />
+                                <span>
+                                  {toolName === "searchGitHubProfiles"
+                                    ? "Searched for profiles"
+                                    : "Analyzed profile"}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>
+                                  {toolName === "searchGitHubProfiles"
+                                    ? `Searching for "${(part.input as { query?: string })?.query || 'profiles'}"...`
+                                    : `Analyzing ${(part.input as { username?: string })?.username || 'profile'}...`}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          {hasResult && part.result && renderToolResult(toolName, part.result)}
                         </div>
-                        {part.toolInvocation.state === "result" &&
-                          renderToolResult(part.toolInvocation.toolName, part.toolInvocation.result)}
-                      </div>
-                    ))}
+                      );
+                    })}
                     {/* Text content */}
                     {getMessageText(message) && (
                       <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
