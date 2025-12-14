@@ -23,6 +23,7 @@ import { SiteHeader } from "@/components/site-header";
 import { GitSignalLogoWave } from "@/components/gitsignal-logo";
 import Link from "next/link";
 import { DefaultChatTransport } from "ai";
+import ReactMarkdown from "react-markdown";
 
 // Types for message parts
 interface TextPart {
@@ -324,6 +325,10 @@ function AISearchContent() {
         showSignIn
       />
 
+      <pre>
+      {JSON.stringify(messages, null, 2)}
+      </pre>
+
       {/* Main Chat Area */}
       <main className="relative z-10 flex-1 flex flex-col container mx-auto px-4 md:px-6 pt-8 pb-4 max-w-4xl">
         {/* Header */}
@@ -422,7 +427,9 @@ function AISearchContent() {
                     {/* Text content */}
                     {getMessageText(message) && (
                       <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
-                        <p className="text-white whitespace-pre-wrap">{getMessageText(message)}</p>
+                        <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
+                          <ReactMarkdown>{getMessageText(message)}</ReactMarkdown>
+                        </div>
                       </div>
                     )}
                   </>
