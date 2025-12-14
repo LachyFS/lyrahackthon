@@ -627,10 +627,10 @@ function AISearchContent() {
                       .map((part, i) => (
                         <div
                           key={`reasoning-${i}`}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-muted-foreground"
+                          className="flex items-center gap-2 text-xs text-muted-foreground"
                         >
                           <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
-                          <span className="italic truncate">{part.text}</span>
+                          <span className="truncate">{part.text}</span>
                         </div>
                       ))}
                     {/* Tool invocations */}
