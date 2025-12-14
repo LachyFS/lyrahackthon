@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   ReactFlow,
   Node,
   Edge,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   useNodesState,
@@ -17,6 +18,7 @@ import {
   ConnectionMode,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import * as d3 from "d3";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, Star, GitFork } from "lucide-react";
@@ -26,6 +28,13 @@ interface ExpandedCollaborationGraphProps {
   profile: GitHubProfile;
   collaboration: CollaborationData;
   fullscreen?: boolean;
+}
+
+// D3 force simulation node type
+interface SimNode extends d3.SimulationNodeDatum {
+  id: string;
+  type: string;
+  isCenter?: boolean;
 }
 
 
@@ -48,38 +57,39 @@ function UserNode({ data }: { data: { label: string; avatar: string; isCenter?: 
   };
 
   const size = data.isCenter || data.isSelected ? 96 : 56;
-  const handleOffset = size / 2;
 
   return (
     <div className={`flex flex-col items-center gap-1 group cursor-pointer relative transition-opacity duration-300 ${data.isFaded ? "opacity-30" : "opacity-100"}`}>
-      {/* Centered handle for edge connections */}
+      {/* Single centered handle that works for both source and target */}
       <Handle
         type="source"
         position={Position.Top}
-        id="center-source"
         style={{
-          background: 'transparent',
-          border: 'none',
-          top: handleOffset,
+          position: 'absolute',
+          top: size / 2,
           left: '50%',
           transform: 'translateX(-50%)',
-          width: 1,
-          height: 1,
+          background: 'transparent',
+          border: 'none',
+          width: 10,
+          height: 10,
         }}
+        isConnectable={false}
       />
       <Handle
         type="target"
         position={Position.Top}
-        id="center-target"
         style={{
-          background: 'transparent',
-          border: 'none',
-          top: handleOffset,
+          position: 'absolute',
+          top: size / 2,
           left: '50%',
           transform: 'translateX(-50%)',
-          width: 1,
-          height: 1,
+          background: 'transparent',
+          border: 'none',
+          width: 10,
+          height: 10,
         }}
+        isConnectable={false}
       />
 
       <div className="relative">
@@ -128,47 +138,55 @@ function UserNode({ data }: { data: { label: string; avatar: string; isCenter?: 
 }
 
 // Custom node component for repository nodes
-function RepoNodeComponent({ data }: { data: { label: string; fullName: string; description: string | null; stars: number; language: string | null; isFaded?: boolean } }) {
-  const handleOffset = 24; // Half of the node height
+function RepoNodeComponent({ data }: { data: { label: string; fullName: string; description: string | null; stars: number; language: string | null; isFork?: boolean; isFaded?: boolean } }) {
+  // Different styling for forks vs original repos
+  const borderColor = data.isFork ? "border-slate-500/70" : "border-amber-500/70";
+  const hoverBorderColor = data.isFork ? "group-hover:border-slate-400" : "group-hover:border-amber-400";
+  const iconColor = data.isFork ? "text-slate-400" : "text-amber-400";
 
   return (
     <div className={`flex flex-col items-center gap-1 group cursor-pointer relative transition-opacity duration-300 ${data.isFaded ? "opacity-30" : "opacity-100"}`}>
-      {/* Centered handle for edge connections */}
+      {/* Centered handles for edge connections */}
       <Handle
         type="source"
         position={Position.Top}
-        id="center-source"
         style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
           background: 'transparent',
           border: 'none',
-          top: handleOffset,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 1,
-          height: 1,
+          width: 10,
+          height: 10,
         }}
+        isConnectable={false}
       />
       <Handle
         type="target"
         position={Position.Top}
-        id="center-target"
         style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
           background: 'transparent',
           border: 'none',
-          top: handleOffset,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 1,
-          height: 1,
+          width: 10,
+          height: 10,
         }}
+        isConnectable={false}
       />
 
-      <div className="rounded-lg border-2 border-amber-500/70 bg-background px-3 py-2 min-w-[80px] max-w-[140px] transition-all group-hover:scale-105 group-hover:border-amber-400">
+      <div className={`rounded-lg border-2 ${borderColor} bg-background px-3 py-2 min-w-[80px] max-w-[140px] transition-all group-hover:scale-105 ${hoverBorderColor}`}>
         <div className="flex items-center gap-1.5 mb-1">
-          <GitFork className="h-3 w-3 text-amber-400 flex-shrink-0" />
+          <GitFork className={`h-3 w-3 ${iconColor} flex-shrink-0`} />
           <span className="text-xs font-medium text-white truncate">{data.label}</span>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          {data.isFork && (
+            <span className="text-slate-400 italic">fork</span>
+          )}
           {data.stars > 0 && (
             <span className="flex items-center gap-0.5">
               <Star className="h-2.5 w-2.5 text-yellow-400" />
@@ -241,10 +259,218 @@ function CollaborationGraphInner({
     return connected;
   }, [selectedNode, connections]);
 
-  // Generate nodes and edges based on connections data
-  const { initialNodes, initialEdges } = useMemo(() => {
-    const nodes: Node[] = [];
+  // D3 force simulation state - Obsidian-style continuous simulation
+  const simulationRef = useRef<d3.Simulation<SimNode, undefined> | null>(null);
+  const simNodesRef = useRef<SimNode[]>([]);
+  const [simulatedPositions, setSimulatedPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const isDraggingRef = useRef<string | null>(null);
+
+  // Build graph data structure for D3
+  const graphData = useMemo(() => {
+    const centerX = 450;
+    const centerY = 350;
+
+    // Create D3 nodes - Obsidian style: no fixed positions, everything floats
+    const d3Nodes: SimNode[] = [];
+
+    // Center node - slightly heavier but still movable
+    d3Nodes.push({
+      id: profile.login,
+      type: "user",
+      isCenter: true,
+      x: centerX,
+      y: centerY,
+    });
+
+    // Repo nodes - cluster closer to center
+    repos.forEach((repo, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(repos.length, 1);
+      d3Nodes.push({
+        id: `repo:${repo.full_name}`,
+        type: "repo",
+        x: centerX + Math.cos(angle) * 150 + (Math.random() - 0.5) * 50,
+        y: centerY + Math.sin(angle) * 150 + (Math.random() - 0.5) * 50,
+      });
+    });
+
+    // Collaborator nodes - spread out organically
+    nonOrgCollaborators.forEach((collab, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(nonOrgCollaborators.length, 1);
+      const radius = 250 + (Math.random() * 100);
+      d3Nodes.push({
+        id: collab.login,
+        type: "collaborator",
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+      });
+    });
+
+    // Create D3 links from connections
+    const nodeIds = new Set(d3Nodes.map(n => n.id));
+    const d3Links: Array<d3.SimulationLinkDatum<SimNode>> = [];
+
+    connections.forEach((conn) => {
+      if (conn.type === "org") return;
+      if (nodeIds.has(conn.source) && nodeIds.has(conn.target)) {
+        d3Links.push({
+          source: conn.source,
+          target: conn.target,
+        });
+      }
+    });
+
+    return { nodes: d3Nodes, links: d3Links };
+  }, [profile.login, repos, nonOrgCollaborators, connections]);
+
+  // Run D3 force simulation - Obsidian-style continuous physics
+  useEffect(() => {
+    // Stop any existing simulation
+    if (simulationRef.current) {
+      simulationRef.current.stop();
+    }
+
+    const { nodes, links } = graphData;
+    if (nodes.length === 0) return;
+
+    // Create a deep copy of nodes for the simulation
+    const simNodes = nodes.map(n => ({ ...n }));
+    simNodesRef.current = simNodes;
+
+    // Obsidian-style force simulation - softer, more organic
+    const simulation = d3.forceSimulation<SimNode>(simNodes)
+      // Link force - elastic connections like springs
+      .force("link", d3.forceLink<SimNode, d3.SimulationLinkDatum<SimNode>>(links)
+        .id((d) => d.id)
+        .distance((link) => {
+          const source = link.source as SimNode;
+          const target = link.target as SimNode;
+          // Longer distances for better spacing
+          if (source.isCenter || target.isCenter) return 200; // Center to repo
+          if (source.type === "repo" || target.type === "repo") return 180; // Repo to collaborator
+          return 250; // Default
+        })
+        .strength(0.4)) // Slightly stronger for better structure
+      // Charge force - nodes repel each other more
+      .force("charge", d3.forceManyBody<SimNode>()
+        .strength((d) => {
+          if (d.isCenter) return -800; // Strong repulsion from center
+          if (d.type === "repo") return -400;
+          return -300; // Stronger repulsion for spacing
+        })
+        .distanceMax(600)) // Larger repulsion range
+      // Collision - prevent overlapping with more space
+      .force("collision", d3.forceCollide<SimNode>()
+        .radius((d) => {
+          if (d.isCenter) return 80;
+          if (d.type === "repo") return 70;
+          return 60;
+        })
+        .strength(0.8))
+      // Gentle centering force - keeps graph from drifting away
+      .force("center", d3.forceCenter(450, 350).strength(0.03))
+      // Very gentle x/y positioning to prevent extreme drift
+      .force("x", d3.forceX(450).strength(0.01))
+      .force("y", d3.forceY(350).strength(0.01))
+      // Velocity decay - how quickly nodes slow down (lower = more floaty)
+      .velocityDecay(0.4)
+      // Alpha decay - how quickly simulation settles (lower = longer animation)
+      .alphaDecay(0.01)
+      // Minimum alpha - simulation keeps running gently
+      .alphaMin(0.001)
+      .alphaTarget(0.02); // Keep a tiny bit of movement always (Obsidian-style)
+
+    simulationRef.current = simulation;
+
+    // Update positions on each tick
+    simulation.on("tick", () => {
+      const positions = new Map<string, { x: number; y: number }>();
+      simNodes.forEach((node) => {
+        positions.set(node.id, { x: node.x || 450, y: node.y || 350 });
+      });
+      setSimulatedPositions(new Map(positions));
+    });
+
+    // Start simulation
+    simulation.alpha(1).restart();
+
+    return () => {
+      simulation.stop();
+    };
+  }, [graphData]);
+
+  // Handle node drag - Obsidian-style interactive dragging
+  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
+    isDraggingRef.current = node.id;
+    const simNode = simNodesRef.current.find(n => n.id === node.id);
+    if (simNode && simulationRef.current) {
+      // Fix the node position while dragging
+      simNode.fx = simNode.x;
+      simNode.fy = simNode.y;
+      // Reheat the simulation for responsive dragging
+      simulationRef.current.alphaTarget(0.3).restart();
+    }
+  }, []);
+
+  const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
+    const simNode = simNodesRef.current.find(n => n.id === node.id);
+    if (simNode) {
+      // Update fixed position to follow drag
+      simNode.fx = node.position.x;
+      simNode.fy = node.position.y;
+    }
+  }, []);
+
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
+    isDraggingRef.current = null;
+    const simNode = simNodesRef.current.find(n => n.id === node.id);
+    if (simNode && simulationRef.current) {
+      // Release the node - let it float again
+      simNode.fx = null;
+      simNode.fy = null;
+      // Cool down the simulation gradually
+      simulationRef.current.alphaTarget(0.02);
+    }
+  }, []);
+
+  // Generate edges only once (not dependent on positions)
+  const graphEdges = useMemo(() => {
     const edges: Edge[] = [];
+    const nodeIds = new Set<string>();
+
+    // Collect all node IDs
+    nodeIds.add(profile.login);
+    repos.forEach(repo => nodeIds.add(`repo:${repo.full_name}`));
+    nonOrgCollaborators.forEach(collab => nodeIds.add(collab.login));
+
+    connections.forEach((conn, index) => {
+      if (conn.type === "org") return;
+
+      if (nodeIds.has(conn.source) && nodeIds.has(conn.target)) {
+        let edgeColor = "#06b6d4";
+
+        if (conn.type === "repo") {
+          edgeColor = "#f59e0b";
+        }
+
+        edges.push({
+          id: `edge-${index}-${conn.source}-${conn.target}`,
+          source: conn.source,
+          target: conn.target,
+          type: 'straight',
+          style: {
+            stroke: edgeColor,
+            strokeWidth: 2,
+          },
+        });
+      }
+    });
+
+    return edges;
+  }, [profile.login, repos, nonOrgCollaborators, connections]);
+
+  // Generate React Flow nodes using simulated positions
+  const initialNodes = useMemo(() => {
+    const nodes: Node[] = [];
     const centerX = 450;
     const centerY = 350;
 
@@ -254,11 +480,19 @@ function CollaborationGraphInner({
       return !connectedNodeIds.has(nodeId);
     };
 
+    // Initial positions - will be updated by D3 simulation via useEffect
+    const getPosition = (_nodeId: string, defaultX: number, defaultY: number) => {
+      return { x: defaultX, y: defaultY };
+    };
+
     // Center node (the profile being analyzed) - with org badges
+    const centerPos = getPosition(profile.login, centerX, centerY);
     nodes.push({
       id: profile.login,
       type: "userNode",
-      position: { x: centerX, y: centerY },
+      position: centerPos,
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
       data: {
         label: profile.login,
         avatar: profile.avatar_url,
@@ -269,131 +503,77 @@ function CollaborationGraphInner({
       },
     });
 
-    // Position repo nodes in an inner ring (between center and contributors)
-    const repoRadius = 130;
+    // Repo nodes
+    repos.forEach((repo) => {
+      const nodeId = `repo:${repo.full_name}`;
+      const pos = getPosition(nodeId, centerX, centerY);
 
-    if (repos.length > 0) {
-      const repoAngleStep = (2 * Math.PI) / repos.length;
-      repos.forEach((repo, index) => {
-        const angle = repoAngleStep * index - Math.PI / 2; // Start from top
-        const x = centerX + repoRadius * Math.cos(angle);
-        const y = centerY + repoRadius * Math.sin(angle);
-        const nodeId = `repo:${repo.full_name}`;
-
-        nodes.push({
-          id: nodeId,
-          type: "repoNode",
-          position: { x, y },
-          data: {
-            label: repo.name,
-            fullName: repo.full_name,
-            description: repo.description,
-            stars: repo.stars,
-            language: repo.language,
-            isFaded: shouldFade(nodeId),
-          },
-        });
+      nodes.push({
+        id: nodeId,
+        type: "repoNode",
+        position: pos,
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
+        data: {
+          label: repo.name,
+          fullName: repo.full_name,
+          description: repo.description,
+          stars: repo.stars,
+          language: repo.language,
+          isFork: repo.isFork,
+          isFaded: shouldFade(nodeId),
+        },
       });
-    }
-
-    // Group collaborators by type for better organization
-    const typeOrder: Array<"contributor" | "following" | "follower"> = ["contributor", "following", "follower"];
-    const groupedCollabs = typeOrder.map(type => nonOrgCollaborators.filter(c => c.type === type));
-
-    // Calculate segment angles for each type group
-    const totalCollabs = nonOrgCollaborators.length;
-    const baseRadius = 280; // Pushed out to make room for repos
-
-    // Position collaborators in segments by type (like a pie chart)
-    let currentAngle = -Math.PI / 2; // Start from top
-
-    groupedCollabs.forEach((group) => {
-      if (group.length === 0) return;
-
-      // Each group gets proportional space
-      const groupAngle = (group.length / Math.max(totalCollabs, 1)) * 2 * Math.PI;
-      const spacing = groupAngle / (group.length + 1);
-
-      group.forEach((collab, index) => {
-        const angle = currentAngle + spacing * (index + 1);
-        // Vary radius slightly for visual interest
-        const radiusVariation = (index % 2 === 0) ? 0 : 20;
-        const radius = baseRadius + radiusVariation;
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
-
-        nodes.push({
-          id: collab.login,
-          type: "userNode",
-          position: { x, y },
-          data: {
-            label: collab.login,
-            avatar: collab.avatar_url,
-            type: collab.type,
-            relationship: collab.relationship,
-            isSelected: selectedNode === collab.login,
-            isFaded: shouldFade(collab.login),
-          },
-        });
-      });
-
-      currentAngle += groupAngle;
     });
 
-    // Create edges from connections data (skip org connections - orgs shown as badges)
-    const nodeIds = new Set(nodes.map(n => n.id));
+    // Collaborator nodes
+    nonOrgCollaborators.forEach((collab) => {
+      const pos = getPosition(collab.login, centerX, centerY);
 
-    connections.forEach((conn, index) => {
-      // Skip org connections - we show orgs as badges instead
-      if (conn.type === "org") return;
-
-      // Only create edge if both nodes exist in our filtered view
-      if (nodeIds.has(conn.source) && nodeIds.has(conn.target)) {
-        let edgeColor = "#06b6d4"; // Default cyan for contributors
-        let strokeWidth = 1.5;
-        const opacity = 1;
-
-        // Determine edge styling based on connection type
-        const isRepoConnection = conn.source.startsWith('repo:') || conn.target.startsWith('repo:');
-
-        if (conn.type === "repo") {
-          // User to repo connection
-          edgeColor = "#f59e0b"; // Amber for repo connections
-          strokeWidth = 2;
-        } else if (conn.type === "contributor" && isRepoConnection) {
-          // Repo to contributor connection
-          edgeColor = "#06b6d4"; // Cyan
-          strokeWidth = 1.5;
-        }
-
-        // Fade edges that aren't connected to the selected node
-        const isConnectedToSelected = selectedNode && (conn.source === selectedNode || conn.target === selectedNode);
-        const edgeOpacity = selectedNode ? (isConnectedToSelected ? opacity : 0.1) : opacity;
-
-        edges.push({
-          id: `edge-${index}-${conn.source}-${conn.target}`,
-          source: conn.source,
-          target: conn.target,
-          sourceHandle: "center-source",
-          targetHandle: "center-target",
-          type: "straight",
-          style: { stroke: edgeColor, strokeWidth, opacity: edgeOpacity, transition: "opacity 0.3s" },
-        });
-      }
+      nodes.push({
+        id: collab.login,
+        type: "userNode",
+        position: pos,
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
+        data: {
+          label: collab.login,
+          avatar: collab.avatar_url,
+          type: collab.type,
+          relationship: collab.relationship,
+          isSelected: selectedNode === collab.login,
+          isFaded: shouldFade(collab.login),
+        },
+      });
     });
 
-    return { initialNodes: nodes, initialEdges: edges };
-  }, [profile, nonOrgCollaborators, connections, repos, organizations, selectedNode, connectedNodeIds]);
+    return nodes;
+  }, [profile, nonOrgCollaborators, repos, organizations, selectedNode, connectedNodeIds]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges] = useEdgesState(graphEdges);
 
-  // Update nodes and edges when selection or filter changes
-  // (user changes are handled by key-based remounting)
+  // Update node positions without replacing the entire nodes array
+  // This prevents React Flow from clearing edges
   useEffect(() => {
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
+    setNodes((nds) =>
+      nds.map((node) => {
+        const simPos = simulatedPositions.get(node.id);
+        if (simPos) {
+          return {
+            ...node,
+            position: simPos,
+          };
+        }
+        return node;
+      })
+    );
+  }, [simulatedPositions, setNodes]);
+
+  // Only update edges when the graph structure changes (new user/data)
+  useEffect(() => {
+    setEdges(graphEdges);
+  }, [graphEdges, setEdges]);
 
   const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {
     // If clicking the center node, do nothing
@@ -477,6 +657,10 @@ function CollaborationGraphInner({
             <span className="text-muted-foreground">Repository</span>
           </div>
           <div className="flex items-center gap-1.5">
+            <div className="w-4 h-3 rounded border-2 border-slate-500" />
+            <span className="text-muted-foreground">Fork</span>
+          </div>
+          <div className="flex items-center gap-1.5">
             <div className="w-3 h-3 rounded-full border-2 border-cyan-500" />
             <span className="text-muted-foreground">Contributor</span>
           </div>
@@ -498,11 +682,11 @@ function CollaborationGraphInner({
         </div>
       </div>
 
-      {/* Graph */}
-      <div className={fullscreen ? "flex-1 bg-background/50 relative" : "h-[700px] bg-background/50 relative"}>
+      {/* Graph - Obsidian-style dark canvas */}
+      <div className={fullscreen ? "flex-1 bg-[#1a1a2e] relative" : "h-[700px] bg-[#1a1a2e] relative"}>
         {/* Loading overlay */}
         {isLoading && (
-          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-[#1a1a2e]/90 backdrop-blur-sm z-50 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
               <span className="text-sm text-muted-foreground">Loading network...</span>
@@ -510,30 +694,28 @@ function CollaborationGraphInner({
           </div>
         )}
 
-        {/* Concentric circle guides */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="absolute w-[260px] h-[260px] rounded-full border border-amber-500/20" />
-          <div className="absolute w-[560px] h-[560px] rounded-full border border-cyan-500/15" />
-          <div className="absolute w-[900px] h-[900px] rounded-full border border-gray-500/10" />
-        </div>
-
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
           nodeTypes={nodeTypes}
+          defaultEdgeOptions={{
+            style: { stroke: '#06b6d4', strokeWidth: 2 },
+            animated: false,
+          }}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
           maxZoom={2}
           proOptions={{ hideAttribution: true }}
           connectionMode={ConnectionMode.Loose}
-          defaultEdgeOptions={{ type: "straight" }}
         >
-          <Background color="#333" gap={20} />
+          <Background color="#2a2a4a" gap={25} variant={BackgroundVariant.Dots} size={1} />
           <Controls
             showInteractive={false}
             className="!bg-white/10 !border-white/10 !shadow-none [&>button]:!bg-white/10 [&>button]:!border-white/10 [&>button]:!text-white [&>button:hover]:!bg-white/20"

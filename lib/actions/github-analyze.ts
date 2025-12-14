@@ -83,6 +83,7 @@ export interface RepoNode {
   stars: number;
   language: string | null;
   owner: string;
+  isFork?: boolean;
 }
 
 export interface CollaborationData {
@@ -159,6 +160,45 @@ async function fetchGitHub<T>(endpoint: string, token: string | null): Promise<T
   }
 
   return response.json();
+}
+
+// GraphQL API for efficient batch queries
+interface GraphQLResponse<T> {
+  data: T;
+  errors?: Array<{ message: string }>;
+}
+
+async function fetchGitHubGraphQL<T>(query: string, variables: Record<string, unknown>, token: string | null): Promise<T> {
+  if (!token) {
+    throw new Error("GraphQL API requires authentication. Please sign in with GitHub.");
+  }
+
+  const response = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Authentication required for GraphQL API.");
+    }
+    if (response.status === 403) {
+      throw new Error("Rate limit exceeded. Please try again later.");
+    }
+    throw new Error(`GitHub GraphQL API error: ${response.status}`);
+  }
+
+  const result: GraphQLResponse<T> = await response.json();
+
+  if (result.errors && result.errors.length > 0) {
+    throw new Error(`GraphQL error: ${result.errors[0].message}`);
+  }
+
+  return result.data;
 }
 
 function calculateLanguages(repos: GitHubRepo[]): { name: string; count: number; percentage: number }[] {
@@ -332,7 +372,242 @@ function getRecommendation(score: number): AnalysisResult["analysis"]["recommend
   return "weak";
 }
 
-async function fetchCollaborationData(
+// GraphQL query for fetching collaboration data efficiently in a single request
+// Note: We don't fetch organizations here as it requires read:org scope
+// Organizations are fetched separately via REST API
+const COLLABORATION_QUERY = `
+  query GetUserCollaboration($username: String!, $repoCount: Int!, $contributorCount: Int!) {
+    user(login: $username) {
+      login
+      avatarUrl
+      repositories(first: $repoCount, orderBy: {field: STARGAZERS, direction: DESC}, ownerAffiliations: OWNER) {
+        nodes {
+          name
+          nameWithOwner
+          description
+          stargazerCount
+          forkCount
+          isFork
+          primaryLanguage {
+            name
+          }
+          mentionableUsers(first: $contributorCount) {
+            nodes {
+              login
+              avatarUrl
+            }
+          }
+        }
+      }
+      repositoriesContributedTo(first: 30, contributionTypes: [COMMIT, PULL_REQUEST, ISSUE], orderBy: {field: STARGAZERS, direction: DESC}) {
+        nodes {
+          name
+          nameWithOwner
+          description
+          stargazerCount
+          primaryLanguage {
+            name
+          }
+          owner {
+            login
+            avatarUrl
+          }
+        }
+      }
+    }
+  }
+`;
+
+interface GraphQLCollaborationResponse {
+  user: {
+    login: string;
+    avatarUrl: string;
+    repositories: {
+      nodes: Array<{
+        name: string;
+        nameWithOwner: string;
+        description: string | null;
+        stargazerCount: number;
+        forkCount: number;
+        isFork: boolean;
+        primaryLanguage: { name: string } | null;
+        mentionableUsers: {
+          nodes: Array<{
+            login: string;
+            avatarUrl: string;
+          }>;
+        };
+      }>;
+    };
+    repositoriesContributedTo: {
+      nodes: Array<{
+        name: string;
+        nameWithOwner: string;
+        description: string | null;
+        stargazerCount: number;
+        primaryLanguage: { name: string } | null;
+        owner: {
+          login: string;
+          avatarUrl: string;
+        };
+      }>;
+    };
+  };
+}
+
+async function fetchCollaborationDataGraphQL(
+  username: string,
+  token: string
+): Promise<CollaborationData> {
+  const collaborators: Collaborator[] = [];
+  const repoNodes: RepoNode[] = [];
+  const connections: CollaborationData["connections"] = [];
+  const seenUsers = new Set<string>();
+  const seenRepos = new Set<string>();
+  seenUsers.add(username.toLowerCase());
+
+  // Fetch GraphQL data and organizations (via REST) in parallel
+  const [data, orgsFromRest] = await Promise.all([
+    fetchGitHubGraphQL<GraphQLCollaborationResponse>(
+      COLLABORATION_QUERY,
+      { username, repoCount: 30, contributorCount: 20 },
+      token
+    ),
+    // Fetch orgs via REST since GraphQL requires read:org scope
+    fetchGitHub<Array<{ login: string; avatar_url: string; description: string | null }>>(
+      `/users/${username}/orgs`,
+      token
+    ).catch(() => [] as Array<{ login: string; avatar_url: string; description: string | null }>),
+  ]);
+
+  const user = data.user;
+  const organizations: CollaborationData["organizations"] = [];
+
+  // Process organizations from REST API
+  for (const org of orgsFromRest) {
+    organizations.push({
+      login: org.login,
+      avatar_url: org.avatar_url,
+      description: org.description,
+    });
+
+    if (!seenUsers.has(org.login.toLowerCase())) {
+      seenUsers.add(org.login.toLowerCase());
+      collaborators.push({
+        login: org.login,
+        avatar_url: org.avatar_url,
+        type: "org",
+        relationship: "Member of organization",
+        degree: 1,
+      });
+      connections.push({
+        source: username,
+        target: org.login,
+        type: "org",
+      });
+    }
+  }
+
+  // Process owned repositories and their contributors
+  for (const repo of user.repositories.nodes) {
+    if (seenRepos.has(repo.nameWithOwner.toLowerCase())) continue;
+    seenRepos.add(repo.nameWithOwner.toLowerCase());
+
+    // Add all repos, not just those with collaborators
+    repoNodes.push({
+      name: repo.name,
+      full_name: repo.nameWithOwner,
+      description: repo.description,
+      stars: repo.stargazerCount,
+      language: repo.primaryLanguage?.name || null,
+      owner: username,
+      isFork: repo.isFork,
+    });
+
+    connections.push({
+      source: username,
+      target: `repo:${repo.nameWithOwner}`,
+      type: "repo",
+    });
+
+    // Add contributors if any
+    const otherContributors = repo.mentionableUsers.nodes.filter(
+      c => c.login.toLowerCase() !== username.toLowerCase()
+    );
+
+    for (const contributor of otherContributors) {
+      connections.push({
+        source: `repo:${repo.nameWithOwner}`,
+        target: contributor.login,
+        type: "contributor",
+      });
+
+      if (!seenUsers.has(contributor.login.toLowerCase())) {
+        seenUsers.add(contributor.login.toLowerCase());
+        collaborators.push({
+          login: contributor.login,
+          avatar_url: contributor.avatarUrl,
+          type: "contributor",
+          relationship: `Contributed to ${repo.name}`,
+          repoName: repo.name,
+          degree: 1,
+        });
+      }
+    }
+  }
+
+  // Process repositories the user contributed to (external collaborations)
+  for (const repo of user.repositoriesContributedTo.nodes) {
+    if (repo.owner.login.toLowerCase() === username.toLowerCase()) continue;
+    if (seenRepos.has(repo.nameWithOwner.toLowerCase())) continue;
+
+    seenRepos.add(repo.nameWithOwner.toLowerCase());
+
+    repoNodes.push({
+      name: repo.name,
+      full_name: repo.nameWithOwner,
+      description: repo.description,
+      stars: repo.stargazerCount,
+      language: repo.primaryLanguage?.name || null,
+      owner: repo.owner.login,
+    });
+
+    connections.push({
+      source: username,
+      target: `repo:${repo.nameWithOwner}`,
+      type: "contributor",
+    });
+
+    // Add repo owner as collaborator
+    if (!seenUsers.has(repo.owner.login.toLowerCase())) {
+      seenUsers.add(repo.owner.login.toLowerCase());
+      collaborators.push({
+        login: repo.owner.login,
+        avatar_url: repo.owner.avatarUrl,
+        type: "contributor",
+        relationship: `Owner of ${repo.name}`,
+        repoName: repo.name,
+        degree: 1,
+      });
+    }
+
+    connections.push({
+      source: `repo:${repo.nameWithOwner}`,
+      target: repo.owner.login,
+      type: "repo",
+    });
+  }
+
+  return {
+    collaborators,
+    repos: repoNodes,
+    organizations,
+    connections,
+  };
+}
+
+// Fallback REST API implementation for unauthenticated users
+async function fetchCollaborationDataREST(
   username: string,
   repos: GitHubRepo[],
   token: string | null
@@ -374,21 +649,20 @@ async function fetchCollaborationData(
     }
   }
 
-  // Focus on repos with contributors - this is the main network
-  // Get repos sorted by activity and stars
+  // Get repos sorted by activity and stars - increased limit to 30
   const activeRepos = repos
-    .filter(r => !r.fork)
     .sort((a, b) => {
       const aScore = a.stargazers_count * 2 + a.forks_count;
       const bScore = b.stargazers_count * 2 + b.forks_count;
       return bScore - aScore;
     })
+    .slice(0, 30);
 
-  // Fetch contributors from repos in parallel
+  // Fetch contributors from repos in parallel - increased to 15 per repo
   const contributorPromises = activeRepos.map(async (repo) => {
     try {
       const contributors = await fetchGitHub<Array<{ login: string; avatar_url: string; contributions: number }>>(
-        `/repos/${repo.full_name}/contributors?per_page=8`,
+        `/repos/${repo.full_name}/contributors?per_page=15`,
         token
       );
       return { repo, contributors };
@@ -401,16 +675,13 @@ async function fetchCollaborationData(
 
   // Process repos and their contributors
   for (const { repo, contributors } of repoContributors) {
-    // Filter out the owner from contributors
     const otherContributors = contributors.filter(
       c => c.login.toLowerCase() !== username.toLowerCase() && c.contributions >= 1
     );
 
-    // Only add repo if it has other contributors
     if (otherContributors.length > 0 && !seenRepos.has(repo.full_name.toLowerCase())) {
       seenRepos.add(repo.full_name.toLowerCase());
 
-      // Add repo as a node
       repoNodes.push({
         name: repo.name,
         full_name: repo.full_name,
@@ -420,26 +691,22 @@ async function fetchCollaborationData(
         owner: username,
       });
 
-      // Connect user to repo
       connections.push({
         source: username,
         target: `repo:${repo.full_name}`,
         type: "repo",
       });
 
-      // Add contributors and connect them to repo
-      for (const contributor of otherContributors) {
-        const lowerLogin = contributor.login.toLowerCase();
-
-        // Connect contributor to repo
+      // Increased limit to 10 contributors per repo
+      for (const contributor of otherContributors.slice(0, 10)) {
         connections.push({
           source: `repo:${repo.full_name}`,
           target: contributor.login,
           type: "contributor",
         });
 
-        if (!seenUsers.has(lowerLogin)) {
-          seenUsers.add(lowerLogin);
+        if (!seenUsers.has(contributor.login.toLowerCase())) {
+          seenUsers.add(contributor.login.toLowerCase());
           collaborators.push({
             login: contributor.login,
             avatar_url: contributor.avatar_url,
@@ -459,6 +726,30 @@ async function fetchCollaborationData(
     organizations,
     connections,
   };
+}
+
+// Main function that chooses GraphQL or REST based on token availability
+async function fetchCollaborationData(
+  username: string,
+  repos: GitHubRepo[],
+  token: string | null
+): Promise<CollaborationData> {
+  // Use GraphQL API if authenticated (more efficient - single request)
+  if (token) {
+    try {
+      return await fetchCollaborationDataGraphQL(username, token);
+    } catch (error) {
+      // Fall back to REST if GraphQL fails (e.g., missing scopes like read:org)
+      // Only log non-scope related errors
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes("required scopes")) {
+        console.warn("GraphQL failed, falling back to REST:", error);
+      }
+    }
+  }
+
+  // Fall back to REST API for unauthenticated users or if GraphQL fails
+  return fetchCollaborationDataREST(username, repos, token);
 }
 
 export async function analyzeGitHubProfile(username: string): Promise<AnalysisResult> {
