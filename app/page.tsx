@@ -69,19 +69,31 @@ export default function Home() {
             </div>
 
             {/* Example searches */}
-            <div className="animate-slide-up opacity-0 delay-400 flex flex-wrap justify-center gap-2 text-sm text-muted-foreground">
-              <span>Try:</span>
-              <Link href="/analyze/torvalds" className="text-emerald-400 hover:underline">
-                torvalds
-              </Link>
-              <span>·</span>
-              <Link href="/analyze/gaearon" className="text-emerald-400 hover:underline">
-                gaearon
-              </Link>
-              <span>·</span>
-              <Link href="/analyze/sindresorhus" className="text-emerald-400 hover:underline">
-                sindresorhus
-              </Link>
+            <div className="animate-slide-up opacity-0 delay-400 flex flex-col items-center gap-3 text-sm text-muted-foreground">
+              <div className="flex flex-wrap justify-center gap-2">
+                <span>Analyze:</span>
+                <Link href="/analyze/torvalds" className="text-emerald-400 hover:underline">
+                  torvalds
+                </Link>
+                <span>·</span>
+                <Link href="/analyze/gaearon" className="text-emerald-400 hover:underline">
+                  gaearon
+                </Link>
+                <span>·</span>
+                <Link href="/analyze/sindresorhus" className="text-emerald-400 hover:underline">
+                  sindresorhus
+                </Link>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                <span>Or ask AI:</span>
+                <Link href="/ai-search?q=best%20Rust%20developers%20in%20Sydney" className="text-cyan-400 hover:underline">
+                  &quot;best Rust devs in Sydney&quot;
+                </Link>
+                <span>·</span>
+                <Link href="/ai-search?q=React%20engineers%20with%20open%20source%20contributions" className="text-cyan-400 hover:underline">
+                  &quot;React + open source&quot;
+                </Link>
+              </div>
             </div>
 
             {/* Preview Card */}
