@@ -17,9 +17,14 @@ import {
   Star,
   ChevronDown,
   Loader2,
+  Terminal,
+  Server,
+  GitFork,
+  Cpu,
+  FileSearch,
 } from "lucide-react";
 import { useState } from "react";
-import type { RepoAnalysis } from "@/lib/actions/repo-analyze";
+import type { RepoAnalysis, AnalysisProgress } from "@/lib/actions/repo-analyze";
 
 interface RepoAnalysisCardProps {
   analysis: RepoAnalysis;
@@ -99,7 +104,7 @@ function formatComplexity(complexity: string) {
 
 export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
   const [showFindings, setShowFindings] = useState(false);
-  const recommendation = getRecommendationStyle(analysis.hiringRecommendation);
+  const recommendation = getRecommendationStyle(analysis.hiringRecommendation ?? "maybe");
 
   return (
     <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
@@ -126,19 +131,21 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
               </p>
             )}
           </div>
-          <Badge className={getSkillLevelColor(analysis.skillLevel)}>
-            {analysis.skillLevel.charAt(0).toUpperCase() + analysis.skillLevel.slice(1)}
-          </Badge>
+          {analysis.skillLevel && (
+            <Badge className={getSkillLevelColor(analysis.skillLevel)}>
+              {analysis.skillLevel.charAt(0).toUpperCase() + analysis.skillLevel.slice(1)}
+            </Badge>
+          )}
         </div>
 
         {/* Quick badges */}
         <div className="flex flex-wrap gap-2 mt-3">
-          {analysis.primaryLanguages.slice(0, 4).map((lang) => (
+          {analysis.primaryLanguages?.slice(0, 4).map((lang) => (
             <Badge key={lang} variant="outline" className="text-xs">
               {lang}
             </Badge>
           ))}
-          {analysis.frameworks.slice(0, 3).map((fw) => (
+          {analysis.frameworks?.slice(0, 3).map((fw) => (
             <Badge key={fw} variant="outline" className="text-xs bg-white/5">
               {fw}
             </Badge>
@@ -159,8 +166,8 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
       {/* Main Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 border-b border-white/10">
         <div className="text-center">
-          <div className={`text-lg font-semibold ${getQualityColor(analysis.codeQuality)}`}>
-            {analysis.codeQuality.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+          <div className={`text-lg font-semibold ${getQualityColor(analysis.codeQuality ?? "average")}`}>
+            {(analysis.codeQuality ?? "average").replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
           </div>
           <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
             <Code2 className="h-3 w-3" />
@@ -168,8 +175,8 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
           </div>
         </div>
         <div className="text-center">
-          <div className={`text-lg font-semibold ${getComplexityColor(analysis.complexity.level)}`}>
-            {formatComplexity(analysis.complexity.level)}
+          <div className={`text-lg font-semibold ${getComplexityColor(analysis.complexity?.level ?? "moderate")}`}>
+            {formatComplexity(analysis.complexity?.level ?? "moderate")}
           </div>
           <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
             <Gauge className="h-3 w-3" />
@@ -178,7 +185,7 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
         </div>
         <div className="text-center">
           <div className="text-lg font-semibold text-white">
-            {analysis.complexity.fileCount}
+            {analysis.complexity?.fileCount ?? 0}
           </div>
           <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
             <FileCode className="h-3 w-3" />
@@ -187,7 +194,7 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
         </div>
         <div className="text-center">
           <div className="text-lg font-semibold text-white">
-            {analysis.professionalism.score}/10
+            {analysis.professionalism?.score ?? 0}/10
           </div>
           <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
             <Star className="h-3 w-3" />
@@ -216,50 +223,52 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
             Docs
           </span>
         </div>
-        <div className={`flex flex-col items-center gap-1 p-2 rounded-lg ${analysis.gitPractices.prUsage ? "bg-cyan-500/10" : "bg-white/5"}`}>
-          <Users className={`h-5 w-5 ${analysis.gitPractices.prUsage ? "text-cyan-400" : "text-muted-foreground"}`} />
-          <span className={`text-xs ${analysis.gitPractices.prUsage ? "text-cyan-300" : "text-muted-foreground"}`}>
+        <div className={`flex flex-col items-center gap-1 p-2 rounded-lg ${analysis.gitPractices?.prUsage ? "bg-cyan-500/10" : "bg-white/5"}`}>
+          <Users className={`h-5 w-5 ${analysis.gitPractices?.prUsage ? "text-cyan-400" : "text-muted-foreground"}`} />
+          <span className={`text-xs ${analysis.gitPractices?.prUsage ? "text-cyan-300" : "text-muted-foreground"}`}>
             PRs
           </span>
         </div>
       </div>
 
       {/* Professionalism Details */}
-      <div className="p-4 border-b border-white/10">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
-          <GitCommit className="h-4 w-4" />
-          <span>Professional Practices</span>
+      {analysis.professionalism && (
+        <div className="p-4 border-b border-white/10">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
+            <GitCommit className="h-4 w-4" />
+            <span>Professional Practices</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Commit Messages</div>
+              <div className={`text-sm font-medium ${getQualityColor(analysis.professionalism.commitMessageQuality ?? "average")}`}>
+                {(analysis.professionalism.commitMessageQuality ?? "average").replace(/\b\w/g, (c) => c.toUpperCase())}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Code Organization</div>
+              <div className={`text-sm font-medium ${getQualityColor(analysis.professionalism.codeOrganization ?? "average")}`}>
+                {(analysis.professionalism.codeOrganization ?? "average").replace(/\b\w/g, (c) => c.toUpperCase())}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Naming Conventions</div>
+              <div className="text-sm font-medium text-white">
+                {(analysis.professionalism.namingConventions ?? "consistent").replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Error Handling</div>
+              <div className={`text-sm font-medium ${getQualityColor(analysis.professionalism.errorHandling === "comprehensive" ? "excellent" : analysis.professionalism.errorHandling === "adequate" ? "good" : analysis.professionalism.errorHandling === "minimal" ? "average" : "poor")}`}>
+                {(analysis.professionalism.errorHandling ?? "adequate").replace(/\b\w/g, (c) => c.toUpperCase())}
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <div className="text-xs text-muted-foreground mb-1">Commit Messages</div>
-            <div className={`text-sm font-medium ${getQualityColor(analysis.professionalism.commitMessageQuality)}`}>
-              {analysis.professionalism.commitMessageQuality.replace(/\b\w/g, (c) => c.toUpperCase())}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground mb-1">Code Organization</div>
-            <div className={`text-sm font-medium ${getQualityColor(analysis.professionalism.codeOrganization)}`}>
-              {analysis.professionalism.codeOrganization.replace(/\b\w/g, (c) => c.toUpperCase())}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground mb-1">Naming Conventions</div>
-            <div className="text-sm font-medium text-white">
-              {analysis.professionalism.namingConventions.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground mb-1">Error Handling</div>
-            <div className={`text-sm font-medium ${getQualityColor(analysis.professionalism.errorHandling === "comprehensive" ? "excellent" : analysis.professionalism.errorHandling === "adequate" ? "good" : analysis.professionalism.errorHandling === "minimal" ? "average" : "poor")}`}>
-              {analysis.professionalism.errorHandling.replace(/\b\w/g, (c) => c.toUpperCase())}
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Skill Indicators */}
-      {analysis.skillIndicators.length > 0 && (
+      {analysis.skillIndicators?.length > 0 && (
         <div className="p-4 border-b border-white/10">
           <div className="text-sm text-muted-foreground mb-3">Skill Indicators</div>
           <div className="space-y-2">
@@ -295,7 +304,7 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
 
       {/* Strengths & Areas for Growth */}
       <div className="grid grid-cols-2 gap-4 p-4 border-b border-white/10">
-        {analysis.strengths.length > 0 && (
+        {analysis.strengths?.length > 0 && (
           <div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
               <CheckCircle className="h-4 w-4 text-emerald-400" />
@@ -311,7 +320,7 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
             </ul>
           </div>
         )}
-        {analysis.areasForGrowth.length > 0 && (
+        {analysis.areasForGrowth?.length > 0 && (
           <div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
               <AlertTriangle className="h-4 w-4 text-amber-400" />
@@ -330,13 +339,15 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
       </div>
 
       {/* Summary */}
-      <div className="p-4 border-b border-white/10">
-        <div className="text-sm text-muted-foreground mb-2">Summary</div>
-        <p className="text-sm text-white leading-relaxed">{analysis.summary}</p>
-      </div>
+      {analysis.summary && (
+        <div className="p-4 border-b border-white/10">
+          <div className="text-sm text-muted-foreground mb-2">Summary</div>
+          <p className="text-sm text-white leading-relaxed">{analysis.summary}</p>
+        </div>
+      )}
 
       {/* Raw Findings (Collapsible) */}
-      {analysis.rawFindings.length > 0 && (
+      {analysis.rawFindings?.length > 0 && (
         <div className="border-t border-white/10">
           <button
             onClick={() => setShowFindings(!showFindings)}
@@ -364,7 +375,187 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
   );
 }
 
-// Loading skeleton for repo analysis
+// Decode HTML entities in strings (e.g., &amp; -> &, &lt; -> <)
+function decodeHtmlEntities(str: string): string {
+  const entities: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
+    '&#x27;': "'",
+    '&#x2F;': '/',
+    '&#47;': '/',
+  };
+  return str.replace(/&(?:amp|lt|gt|quot|#39|apos|#x27|#x2F|#47);/g, (match) => entities[match] || match);
+}
+
+// Progress display for streaming repo analysis
+export function RepoAnalysisProgress({ progress }: { progress: AnalysisProgress }) {
+  // Decode HTML entities and clean up sandbox paths in command and output
+  const cleanCommand = (cmd: string) => {
+    let cleaned = decodeHtmlEntities(cmd);
+    // Remove /vercel/sandbox path references
+    cleaned = cleaned.replace(/\/vercel\/sandbox\/?/g, '');
+    return cleaned;
+  };
+
+  const decodedCommand = progress.command ? cleanCommand(progress.command) : undefined;
+  const decodedOutput = progress.commandOutput ? decodeHtmlEntities(progress.commandOutput) : undefined;
+
+  const getStatusIcon = () => {
+    switch (progress.status) {
+      case 'validating':
+        return <FileSearch className="h-5 w-5 text-cyan-400" />;
+      case 'spinning_up_sandbox':
+        return <Server className="h-5 w-5 text-purple-400" />;
+      case 'cloning_repository':
+        return <GitFork className="h-5 w-5 text-emerald-400" />;
+      case 'executing_command':
+        return <Terminal className="h-5 w-5 text-yellow-400" />;
+      case 'analyzing':
+        return <Cpu className="h-5 w-5 text-blue-400" />;
+      case 'generating_report':
+        return <FileCode className="h-5 w-5 text-pink-400" />;
+      case 'error':
+        return <AlertTriangle className="h-5 w-5 text-red-400" />;
+      default:
+        return <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />;
+    }
+  };
+
+  const getStatusColor = () => {
+    switch (progress.status) {
+      case 'validating': return 'border-cyan-500/30 bg-cyan-500/5';
+      case 'spinning_up_sandbox': return 'border-purple-500/30 bg-purple-500/5';
+      case 'cloning_repository': return 'border-emerald-500/30 bg-emerald-500/5';
+      case 'executing_command': return 'border-yellow-500/30 bg-yellow-500/5';
+      case 'analyzing': return 'border-blue-500/30 bg-blue-500/5';
+      case 'generating_report': return 'border-pink-500/30 bg-pink-500/5';
+      case 'error': return 'border-red-500/30 bg-red-500/5';
+      default: return 'border-white/10 bg-white/5';
+    }
+  };
+
+  const getStatusLabel = () => {
+    switch (progress.status) {
+      case 'validating': return 'Validating Repository';
+      case 'spinning_up_sandbox': return 'Setting Up Virtual Environment';
+      case 'cloning_repository': return 'Cloning Repository';
+      case 'executing_command': return 'Running Analysis';
+      case 'analyzing': return 'Processing Results';
+      case 'generating_report': return 'Generating Report';
+      case 'error': return 'Error';
+      default: return 'Analyzing...';
+    }
+  };
+
+  return (
+    <div className={`border rounded-lg overflow-hidden transition-all duration-300 ${getStatusColor()}`}>
+      {/* Repo name header */}
+      {progress.repoOwner && progress.repoName && (
+        <div className="px-4 py-2 bg-white/5 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <GitFork className="h-4 w-4 text-muted-foreground" />
+            <a
+              href={`https://github.com/${progress.repoOwner}/${progress.repoName}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              {progress.repoOwner}/{progress.repoName}
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Status header */}
+      <div className="p-4 border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            {getStatusIcon()}
+            {progress.status !== 'error' && progress.status !== 'complete' && (
+              <span className="absolute -top-1 -right-1 h-2 w-2 bg-emerald-400 rounded-full animate-pulse" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-white">{getStatusLabel()}</span>
+              {progress.stepNumber && (
+                <span className="text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-white/10">
+                  Step {progress.stepNumber}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              {progress.message}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Command display for executing_command status */}
+      {progress.status === 'executing_command' && decodedCommand && (
+        <div className="p-3 bg-black/30">
+          <div className="flex items-start gap-2">
+            <span className="text-emerald-400 font-mono text-xs mt-0.5">$</span>
+            <div className="flex-1 min-w-0">
+              <code className="text-xs font-mono text-cyan-300 break-all">
+                {decodedCommand}
+              </code>
+              {progress.purpose && (
+                <p className="text-xs text-muted-foreground mt-1 italic">
+                  {progress.purpose}
+                </p>
+              )}
+            </div>
+          </div>
+          {decodedOutput && (
+            <div className="mt-2 p-2 rounded bg-black/40 max-h-24 overflow-auto">
+              <pre className="text-xs text-white/60 font-mono whitespace-pre-wrap break-all">
+                {decodedOutput.slice(0, 300)}
+                {decodedOutput.length > 300 && '...'}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Progress stages visualization */}
+      <div className="px-4 py-3 border-t border-white/5">
+        <div className="flex items-center justify-between gap-1">
+          {['validating', 'spinning_up_sandbox', 'cloning_repository', 'executing_command', 'generating_report'].map((stage, i) => {
+            const stages = ['validating', 'spinning_up_sandbox', 'cloning_repository', 'executing_command', 'generating_report'];
+            const currentIndex = stages.indexOf(progress.status);
+            const isComplete = i < currentIndex;
+            const isCurrent = stage === progress.status;
+
+            return (
+              <div key={stage} className="flex items-center flex-1">
+                <div
+                  className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+                    isComplete ? 'bg-emerald-500' :
+                    isCurrent ? 'bg-emerald-500/50 animate-pulse' :
+                    'bg-white/10'
+                  }`}
+                />
+                {i < stages.length - 1 && <div className="w-1" />}
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-between mt-1">
+          <span className="text-[10px] text-muted-foreground">Setup</span>
+          <span className="text-[10px] text-muted-foreground">Analysis</span>
+          <span className="text-[10px] text-muted-foreground">Report</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Loading skeleton for repo analysis (fallback when no progress data)
 export function RepoAnalysisSkeleton() {
   return (
     <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden animate-pulse">

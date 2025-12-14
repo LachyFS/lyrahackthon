@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GitSignal - Understand Developers Without the Jargon",
-  description: "GitSignal translates GitHub profiles into clear, actionable insights for non-technical hiring managers.",
+  title: "Git Radar - Understand Developers Without the Jargon",
+  description: "Git Radar translates GitHub profiles into clear, actionable insights for non-technical hiring managers.",
 };
 
 export default function RootLayout({

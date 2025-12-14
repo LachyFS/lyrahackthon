@@ -1,5 +1,5 @@
 {
-  "name": "lyrathon2025",
+  "name": "git-radar",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.56",
-    "@ai-sdk/react": "^2.0.115",
+    "@ai-sdk/react": "3.0.0-beta.153",
     "@ai-sdk/xai": "^2.0.40",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
@@ -50,7 +50,7 @@
     "@upstash/redis": "^1.35.8",
     "@vercel/sandbox": "^1.1.0",
     "@xyflow/react": "^12.10.0",
-    "ai": "^5.0.113",
+    "ai": "6.0.0-beta.150",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

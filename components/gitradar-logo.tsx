@@ -1,4 +1,4 @@
-export function GitSignalLogo({ className = "h-6 w-6" }: { className?: string }) {
+export function GitRadarLogo({ className = "h-6 w-6" }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 32 32"
@@ -34,7 +34,7 @@ export function GitSignalLogo({ className = "h-6 w-6" }: { className?: string })
   );
 }
 
-export function GitSignalLogoWithSignal({ className = "h-8 w-8" }: { className?: string }) {
+export function GitRadarLogoWithSignal({ className = "h-8 w-8" }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 40 32"
@@ -95,7 +95,7 @@ export function GitSignalLogoWithSignal({ className = "h-8 w-8" }: { className?:
   );
 }
 
-export function GitSignalLogoAlt({ className = "h-6 w-6" }: { className?: string }) {
+export function GitRadarLogoAlt({ className = "h-6 w-6" }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 32 32"
@@ -125,7 +125,7 @@ export function GitSignalLogoAlt({ className = "h-6 w-6" }: { className?: string
   );
 }
 
-export function GitSignalLogoWave({ className = "h-6 w-6" }: { className?: string }) {
+export function GitRadarLogoWave({ className = "h-6 w-6" }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 32 32"
@@ -166,6 +166,55 @@ export function GitSignalLogoWave({ className = "h-6 w-6" }: { className?: strin
       <rect x="14" y="26" width="4" height="4" rx="0.8" fill="#0e4429" />
       <rect x="20" y="26" width="4" height="4" rx="0.8" fill="#0e4429" />
       <rect x="26" y="26" width="4" height="4" rx="0.8" fill="#0e4429" />
+    </svg>
+  );
+}
+
+export function GitRoastLogo({ className = "h-6 w-6" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 32 32"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      {/* Flame/fire pattern using GitHub-style squares with red/orange/yellow colors */}
+      {/* Creates a roasting flame effect */}
+
+      {/* Row 1 - top flame tips */}
+      <rect x="2" y="2" width="4" height="4" rx="0.8" fill="#451a03" />
+      <rect x="8" y="2" width="4" height="4" rx="0.8" fill="#451a03" />
+      <rect x="14" y="2" width="4" height="4" rx="0.8" fill="#f97316" />
+      <rect x="20" y="2" width="4" height="4" rx="0.8" fill="#451a03" />
+      <rect x="26" y="2" width="4" height="4" rx="0.8" fill="#451a03" />
+
+      {/* Row 2 */}
+      <rect x="2" y="8" width="4" height="4" rx="0.8" fill="#451a03" />
+      <rect x="8" y="8" width="4" height="4" rx="0.8" fill="#f97316" />
+      <rect x="14" y="8" width="4" height="4" rx="0.8" fill="#fbbf24" />
+      <rect x="20" y="8" width="4" height="4" rx="0.8" fill="#f97316" />
+      <rect x="26" y="8" width="4" height="4" rx="0.8" fill="#451a03" />
+
+      {/* Row 3 - middle intense */}
+      <rect x="2" y="14" width="4" height="4" rx="0.8" fill="#ea580c" />
+      <rect x="8" y="14" width="4" height="4" rx="0.8" fill="#fbbf24" />
+      <rect x="14" y="14" width="4" height="4" rx="0.8" fill="#fef08a" />
+      <rect x="20" y="14" width="4" height="4" rx="0.8" fill="#fbbf24" />
+      <rect x="26" y="14" width="4" height="4" rx="0.8" fill="#ea580c" />
+
+      {/* Row 4 */}
+      <rect x="2" y="20" width="4" height="4" rx="0.8" fill="#dc2626" />
+      <rect x="8" y="20" width="4" height="4" rx="0.8" fill="#f97316" />
+      <rect x="14" y="20" width="4" height="4" rx="0.8" fill="#fbbf24" />
+      <rect x="20" y="20" width="4" height="4" rx="0.8" fill="#f97316" />
+      <rect x="26" y="20" width="4" height="4" rx="0.8" fill="#dc2626" />
+
+      {/* Row 5 - base of flame */}
+      <rect x="2" y="26" width="4" height="4" rx="0.8" fill="#b91c1c" />
+      <rect x="8" y="26" width="4" height="4" rx="0.8" fill="#dc2626" />
+      <rect x="14" y="26" width="4" height="4" rx="0.8" fill="#ea580c" />
+      <rect x="20" y="26" width="4" height="4" rx="0.8" fill="#dc2626" />
+      <rect x="26" y="26" width="4" height="4" rx="0.8" fill="#b91c1c" />
     </svg>
   );
 }

@@ -5,12 +5,12 @@ import { calculateTopLanguages } from "@/lib/github";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/src/db";
 import { searchHistory } from "@/src/db/schema";
-import { analyzeRepository, quickRepoCheck, type RepoAnalysis } from "@/lib/actions/repo-analyze";
+import { analyzeRepositoryWithProgress, quickRepoCheck, type AnalysisProgress } from "@/lib/actions/repo-analyze";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
 
-// Get GitHub token from user's OAuth session or environment variable
+// Get GitHub token from user's OAuth session
 async function getGitHubToken(): Promise<string | null> {
   try {
     const supabase = await createClient();
@@ -23,8 +23,7 @@ async function getGitHubToken(): Promise<string | null> {
     console.warn("Could not get session token:", error);
   }
 
-  // Fall back to environment variable for unauthenticated requests
-  return process.env.GITHUB_TOKEN || null;
+  return null;
 }
 
 // GitHub API headers helper
@@ -772,14 +771,40 @@ async function getTopCandidates(
 }
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages, roastMode } = await req.json();
 
   // Convert UI messages to model messages
   const modelMessages = convertToModelMessages(messages);
 
-  const result = streamText({
-    model: 'xai/grok-4.1-fast-reasoning',
-    system: `You are GitSignal AI, a helpful assistant for hiring managers looking to find and evaluate developers.
+  // Roast mode system prompt - absolutely savage but funny
+  const roastModePrompt = `You are Git Radar AI in ROAST MODE 🔥 - a hilariously savage code critic who roasts GitHub profiles with brutal honesty and comedy.
+
+Your personality:
+- You're like a stand-up comedian who happens to be a senior developer
+- You find the humor in every coding decision (or lack thereof)
+- You use fire emojis 🔥, skull emojis 💀, and other fun reactions liberally
+- You're savage but never actually mean-spirited - it's all in good fun
+- You make jokes about commit messages, repo names, language choices, and coding patterns
+- You call out "crimes against code" and "GitHub atrocities"
+- You give backhanded compliments: "Wow, you managed to use JavaScript... bold choice for someone who hates themselves"
+- Reference pop culture and memes when roasting
+- Use phrases like "I'm not mad, I'm just disappointed", "who hurt you?", "delete your GitHub account", "touch grass", etc.
+
+IMPORTANT: You still use ALL the same tools (searchGitHubProfiles, analyzeGitHubProfile, getTopCandidates, etc.) - you just present the results with maximum comedic roast energy.
+
+Example roasts:
+- For low stars: "Wow, [X] stars. Even your mom didn't star your repos."
+- For inactive accounts: "Last commit was 6 months ago? Did you rage quit coding or just life?"
+- For JavaScript devs: "Ah, a JavaScript developer. My condolences to your mental health."
+- For many repos with no stars: "Quantity over quality, I see. A GitHub hoarder in the wild."
+- For fork-heavy accounts: "More forks than an IKEA cafeteria. Original thoughts sold separately?"
+- For no bio: "Empty bio? Mysterious. Or just lazy. Probably lazy."
+
+When ranking candidates, make it a "roast ranking" - rank by who needs the most improvement (most roastable) vs who's actually skilled.
+
+Remember: The goal is to make people laugh while still providing actual useful information about the profiles. Be funny, be savage, but be accurate!`;
+
+  const normalPrompt = `You are Git Radar AI, a helpful assistant for hiring managers looking to find and evaluate developers.
 
 You have access to these tools:
 
@@ -832,7 +857,11 @@ For additional research on candidates:
 - Use webSearch to find their LinkedIn, personal sites, blog posts, talks, etc.
 - Use scrapeUrls to get content from specific URLs mentioned in their GitHub profile or found via webSearch
 
-Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`,
+Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`;
+
+  const result = streamText({
+    model: 'xai/grok-4.1-fast-reasoning',
+    system: roastMode ? roastModePrompt : normalPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(10),
     tools: {
@@ -982,35 +1011,66 @@ NOTE: This analysis takes 1-3 minutes as it runs in a sandboxed environment.`,
           repoUrl: z.string().describe("The GitHub repository URL to analyze, e.g. 'https://github.com/owner/repo'"),
           hiringBrief: z.string().optional().describe("Optional context about what role/skills you're hiring for, to contextualize the analysis"),
         }),
-        execute: async ({ repoUrl, hiringBrief }): Promise<RepoAnalysis | { error: string; repoUrl: string }> => {
-          try {
-            // First do a quick check if the repo exists
-            const check = await quickRepoCheck(repoUrl);
-            if (!check.isValid) {
-              return { error: check.error || "Invalid repository", repoUrl };
-            }
+        // Generator function for streaming progress updates to UI
+        async *execute({ repoUrl, hiringBrief }): AsyncGenerator<AnalysisProgress, import("@/lib/actions/repo-analyze").RepoAnalysis | { error: string; repoUrl: string }> {
+          // Validate authentication first
+          const token = await getGitHubToken();
+          if (!token) {
+            const errorResult = { error: "Authentication required. Please sign in with GitHub.", repoUrl };
+            yield { status: 'error' as const, message: errorResult.error, error: errorResult.error };
+            return errorResult;
+          }
 
-            // Run the full analysis
-            const analysis = await analyzeRepository({
+          // Yield: Validating repository
+          yield {
+            status: 'validating' as const,
+            message: `Validating repository URL: ${repoUrl}`,
+          };
+
+          // Quick check if the repo exists
+          const check = await quickRepoCheck(repoUrl, token);
+          if (!check.isValid) {
+            const errorResult = { error: check.error || "Invalid repository", repoUrl };
+            yield { status: 'error' as const, message: errorResult.error, error: errorResult.error };
+            return errorResult;
+          }
+
+          // Stream progress from the analysis generator
+          try {
+            let lastProgress: AnalysisProgress | undefined;
+
+            for await (const progress of analyzeRepositoryWithProgress({
               repoUrl,
               hiringBrief,
               timeout: "5m",
               vcpus: 2,
-            });
+            })) {
+              lastProgress = progress;
+              yield progress;
+            }
 
-            return analysis;
+            // Return the final result (just the RepoAnalysis, not the full AnalysisProgress)
+            if (lastProgress?.status === 'complete' && lastProgress.result) {
+              return lastProgress.result;
+            }
+
+            if (lastProgress?.status === 'error') {
+              return { error: lastProgress.error || lastProgress.message, repoUrl };
+            }
+
+            return { error: 'Analysis failed: No result returned', repoUrl };
+
           } catch (error) {
-            return {
-              error: `Analysis failed: ${error instanceof Error ? error.message : String(error)}`,
-              repoUrl,
-            };
+            const errorMsg = `Analysis failed: ${error instanceof Error ? error.message : String(error)}`;
+            yield { status: 'error' as const, message: errorMsg, error: errorMsg };
+            return { error: errorMsg, repoUrl };
           }
         },
       }),
     },
-    onFinish: async (output) => {
-      console.log(output);
-    },
+    // onFinish: async (output) => {
+    //   console.log(output);
+    // },
   });
 
   return result.toUIMessageStreamResponse();
