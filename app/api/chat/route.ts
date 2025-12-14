@@ -327,6 +327,112 @@ async function webSearchAndScrape(query: string, options?: {
   }
 }
 
+// GitHub User Search API - search users directly via GitHub's search API
+async function searchGitHubUsersAPI(
+  query: string,
+  token: string | null,
+  options?: {
+    sort?: "followers" | "repositories" | "joined";
+    order?: "asc" | "desc";
+    perPage?: number;
+  }
+) {
+  const headers = getGitHubHeaders(token);
+
+  try {
+    // Build the search URL with query parameters
+    const params = new URLSearchParams({
+      q: query,
+      per_page: String(options?.perPage || 20),
+    });
+    if (options?.sort) {
+      params.append("sort", options.sort);
+    }
+    if (options?.order) {
+      params.append("order", options.order);
+    }
+
+    const searchUrl = `https://api.github.com/search/users?${params.toString()}`;
+    const res = await fetch(searchUrl, { headers, next: { revalidate: 60 } });
+
+    if (!res.ok) {
+      if (res.status === 403) {
+        return { error: "GitHub API rate limit exceeded. Please try again later." };
+      }
+      if (res.status === 422) {
+        return { error: "Invalid search query. Please refine your search." };
+      }
+      return { error: `GitHub API error: ${res.status}` };
+    }
+
+    const data = await res.json();
+
+    // Fetch additional profile details for each user in parallel
+    const usersWithDetails = await Promise.all(
+      data.items.slice(0, options?.perPage || 20).map(async (user: { login: string; id: number; avatar_url: string; html_url: string; type: string }) => {
+        try {
+          const profileRes = await fetch(`https://api.github.com/users/${user.login}`, {
+            headers,
+            next: { revalidate: 300 },
+          });
+
+          if (profileRes.ok) {
+            const profile = await profileRes.json();
+            return {
+              username: profile.login,
+              name: profile.name || null,
+              bio: profile.bio || null,
+              location: profile.location || null,
+              company: profile.company || null,
+              blog: profile.blog || null,
+              email: profile.email || null,
+              twitter_username: profile.twitter_username || null,
+              public_repos: profile.public_repos,
+              followers: profile.followers,
+              following: profile.following,
+              hireable: profile.hireable || false,
+              created_at: profile.created_at,
+            };
+          }
+        } catch {
+          // If individual profile fetch fails, return basic info
+        }
+
+        return {
+          username: user.login,
+          name: null,
+          bio: null,
+          location: null,
+          company: null,
+          blog: null,
+          email: null,
+          twitter_username: null,
+          public_repos: null,
+          followers: null,
+          following: null,
+          hireable: false,
+          created_at: null,
+        };
+      })
+    );
+
+    return {
+      query,
+      total_count: data.total_count,
+      users: usersWithDetails,
+      searchTips: [
+        "Use 'location:city' to filter by location (e.g., 'location:Sydney')",
+        "Use 'language:lang' to filter by language (e.g., 'language:rust')",
+        "Use 'followers:>N' to filter by follower count (e.g., 'followers:>100')",
+        "Use 'repos:>N' to filter by repo count (e.g., 'repos:>10')",
+        "Combine filters: 'language:typescript location:london followers:>50'",
+      ],
+    };
+  } catch (error) {
+    return { error: `GitHub user search failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 // Exa URL scraper - scrape content from specific URLs
 async function scrapeUrls(urls: string[]) {
   try {
@@ -677,19 +783,21 @@ export async function POST(req: Request) {
 You have access to these tools:
 
 **GitHub-specific tools:**
-1. **searchGitHubProfiles**: Search for GitHub profiles based on natural language queries like "rust developers in Sydney" or "machine learning engineers". Uses Exa AI to find relevant GitHub profiles.
+1. **searchGitHubProfiles**: Search for GitHub profiles using Exa AI. Best for natural language queries like "rust developers in Sydney" or "machine learning engineers who contribute to open source". Uses semantic search to find relevant profiles.
 
-2. **analyzeGitHubProfile**: Get detailed analysis of a specific GitHub user by username.
+2. **searchGitHubUsers**: Search GitHub users directly via GitHub's Search API. Best for structured searches with specific filters like location, language, follower count. Supports GitHub qualifiers: 'language:rust location:sydney followers:>100 repos:>10'. Use this when the user wants precise filtering.
 
-3. **getTopCandidates**: Rank and score multiple GitHub profiles against a hiring brief. This displays a rich UI card for each candidate showing their score, match reasons, concerns, languages, and top repos.
+3. **analyzeGitHubProfile**: Get detailed analysis of a specific GitHub user by username.
+
+4. **getTopCandidates**: Rank and score multiple GitHub profiles against a hiring brief. This displays a rich UI card for each candidate showing their score, match reasons, concerns, languages, and top repos.
 
 **General web tools:**
-4. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+5. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
 
-5. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
+6. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
 **Outreach tools:**
-6. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool returns an editable email draft that the user can customize before sending.
+7. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool returns an editable email draft that the user can customize before sending.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
@@ -716,13 +824,26 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
     stopWhen: stepCountIs(10),
     tools: {
       searchGitHubProfiles: tool({
-        description: "Search for GitHub profiles based on a query. Use this to find developers matching specific criteria like location, skills, or expertise areas.",
+        description: "Search for GitHub profiles using Exa AI. Good for natural language queries like 'rust developers in Sydney'. Use this when you want semantic/natural language search.",
         inputSchema: z.object({
           query: z.string().describe("The search query to find GitHub profiles, e.g. 'rust developers in Sydney' or 'React frontend engineers'"),
         }),
         execute: async ({ query }) => {
           const token = await getGitHubToken();
           return searchGitHubProfiles(query, token);
+        },
+      }),
+      searchGitHubUsers: tool({
+        description: "Search GitHub users directly via GitHub's Search API. Supports GitHub's search qualifiers for precise filtering: location:city, language:lang, followers:>N, repos:>N. Use this for structured searches with specific filters.",
+        inputSchema: z.object({
+          query: z.string().describe("GitHub search query with optional qualifiers, e.g. 'language:rust location:sydney' or 'fullstack developer language:typescript followers:>100'"),
+          sort: z.enum(["followers", "repositories", "joined"]).optional().describe("Sort results by: 'followers' (most followed), 'repositories' (most repos), or 'joined' (newest accounts)"),
+          order: z.enum(["asc", "desc"]).optional().describe("Sort order: 'desc' for descending (default), 'asc' for ascending"),
+          perPage: z.number().optional().describe("Number of results to return (default 20, max 30)"),
+        }),
+        execute: async ({ query, sort, order, perPage }) => {
+          const token = await getGitHubToken();
+          return searchGitHubUsersAPI(query, token, { sort, order, perPage });
         },
       }),
       analyzeGitHubProfile: tool({
