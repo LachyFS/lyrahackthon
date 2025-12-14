@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { analyzeGitHubProfile } from "@/lib/actions/github-analyze";
+import { getUser } from "@/lib/actions/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,16 +39,15 @@ function NetworkSkeleton() {
 }
 
 async function NetworkContent({ username }: { username: string }) {
-  let result;
-
-  try {
-    result = await analyzeGitHubProfile(username);
-  } catch (error) {
-    if (error instanceof Error && error.message === "User not found") {
-      notFound();
-    }
-    throw error;
-  }
+  const [result, user] = await Promise.all([
+    analyzeGitHubProfile(username).catch((error) => {
+      if (error instanceof Error && error.message === "User not found") {
+        notFound();
+      }
+      throw error;
+    }),
+    getUser(),
+  ]);
 
   const { profile, collaboration, analysis } = result;
 
@@ -75,6 +75,8 @@ async function NetworkContent({ username }: { username: string }) {
         backLink={{ href: `/analyze/${username}`, label: "Back to analysis" }}
         rightLabel="Collaboration Network"
         externalLink={{ href: `https://github.com/${profile.login}`, label: "GitHub" }}
+        showSignIn
+        user={user}
       />
 
       {/* Floating Side Panel */}

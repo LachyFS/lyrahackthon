@@ -18,12 +18,19 @@ import {
   Code2,
   Activity,
   ExternalLink,
+  Bug,
+  X,
+  ChevronDown,
+  Clock,
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import { GitSignalLogoWave } from "@/components/gitsignal-logo";
 import Link from "next/link";
 import { DefaultChatTransport } from "ai";
 import ReactMarkdown from "react-markdown";
+import { createClient } from "@/lib/supabase/client";
+import { User as SupabaseUser } from "@supabase/supabase-js";
+import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 
 // Types for message parts
 interface TextPart {
@@ -37,18 +44,95 @@ interface ToolPart {
   state: "input-available" | "output-available" | "result";
   input?: Record<string, unknown>;
   result?: unknown;
+  output?: unknown; // AI SDK v4 uses 'output' for tool results
 }
 
 interface StepStartPart {
   type: "step-start";
 }
 
-type MessagePart = TextPart | ToolPart | StepStartPart | { type: string };
+interface ReasoningPart {
+  type: "reasoning";
+  text: string;
+  state: "thinking" | "done";
+}
+
+type MessagePart = TextPart | ToolPart | StepStartPart | ReasoningPart | { type: string };
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   parts: MessagePart[];
+}
+
+interface RecentSearch {
+  id: string;
+  githubUsername: string;
+  githubName: string | null;
+  githubAvatarUrl: string | null;
+  githubBio: string | null;
+  githubLocation: string | null;
+  searchQuery: string | null;
+  createdAt: string;
+}
+
+// Collapsible wrapper for tool results with auto-collapse
+function CollapsibleToolResult({
+  toolName,
+  children,
+  autoCollapse = true,
+}: {
+  toolName: string;
+  children: React.ReactNode;
+  autoCollapse?: boolean;
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const hasAutoCollapsed = useRef(false);
+
+  // Auto-collapse after 2 seconds (unless disabled)
+  useEffect(() => {
+    if (autoCollapse && !hasAutoCollapsed.current) {
+      const timer = setTimeout(() => {
+        setIsExpanded(false);
+        hasAutoCollapsed.current = true;
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [autoCollapse]);
+
+  const getToolLabel = (name: string) => {
+    switch (name) {
+      case "searchGitHubProfiles":
+        return "Search Results";
+      case "analyzeGitHubProfile":
+        return "Profile Analysis";
+      case "getTopCandidates":
+        return "Reviewed Candidates";
+      default:
+        return "Tool Result";
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-white transition-colors w-full"
+      >
+        <ChevronDown
+          className={`h-3 w-3 transition-transform duration-200 ${isExpanded ? '' : '-rotate-90'}`}
+        />
+        <span>{getToolLabel(toolName)}</span>
+      </button>
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-in-out ${
+          isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+        }`}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function AISearchContent() {
@@ -57,6 +141,37 @@ function AISearchContent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasSubmittedInitialRef = useRef(false);
   const [inputValue, setInputValue] = useState("");
+  const [debugMessageId, setDebugMessageId] = useState<string | null>(null);
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+  const [loadingRecent, setLoadingRecent] = useState(true);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const isDev = process.env.NODE_ENV === "development";
+
+  // Fetch user on mount
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
+  }, []);
+
+  // Fetch recent searches on mount
+  useEffect(() => {
+    async function fetchRecentSearches() {
+      try {
+        const res = await fetch("/api/search-history?limit=8");
+        if (res.ok) {
+          const data = await res.json();
+          setRecentSearches(data.searches || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch recent searches:", error);
+      } finally {
+        setLoadingRecent(false);
+      }
+    }
+    fetchRecentSearches();
+  }, []);
 
   const { messages, status, sendMessage } = useChat({
     transport: new DefaultChatTransport({
@@ -93,6 +208,13 @@ function AISearchContent() {
   const getToolParts = (message: ChatMessage): ToolPart[] => {
     return message.parts.filter(
       (part): part is ToolPart => part.type.startsWith("tool-")
+    );
+  };
+
+  // Helper to get reasoning parts from message parts
+  const getReasoningParts = (message: ChatMessage): ReasoningPart[] => {
+    return message.parts.filter(
+      (part): part is ReasoningPart => part.type === "reasoning"
     );
   };
 
@@ -159,14 +281,14 @@ function AISearchContent() {
     }
 
     if (toolName === "analyzeGitHubProfile") {
+      // Note: avatar_url and github_url are not included in the API response
+      // They are constructed from username to avoid sending image URLs to the LLM
       const data = result as {
         username: string;
         name: string | null;
         bio: string | null;
         location: string | null;
         company: string | null;
-        avatar_url: string;
-        github_url: string;
         followers: number;
         public_repos: number;
         accountAge: number;
@@ -205,7 +327,7 @@ function AISearchContent() {
           {/* Profile Header */}
           <div className="flex items-center gap-4 p-4 border-b border-white/10">
             <img
-              src={data.avatar_url}
+              src={`https://github.com/${data.username}.png`}
               alt={data.username}
               className="w-14 h-14 rounded-full border-2 border-white/20"
             />
@@ -213,7 +335,7 @@ function AISearchContent() {
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-white">{data.name || data.username}</h3>
                 <a
-                  href={data.github_url}
+                  href={`https://github.com/${data.username}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-muted-foreground hover:text-white"
@@ -314,6 +436,84 @@ function AISearchContent() {
       );
     }
 
+    if (toolName === "getTopCandidates") {
+      const data = result as {
+        candidates?: Array<{
+          username: string;
+          name: string | null;
+          location: string | null;
+          bio: string | null;
+          score: number;
+          matchReasons: string[];
+          concerns: string[];
+          experience: string;
+          activityLevel: string;
+          topLanguages: string[];
+          topics: string[];
+          totalStars: number;
+          followers: number;
+          recentlyActiveRepos: number;
+          signals?: {
+            isHireable: boolean;
+            hasEmail: boolean;
+            hasBio: boolean;
+            hasWebsite: boolean;
+          };
+          topRepos?: Array<{
+            name: string;
+            description: string | null;
+            stars: number;
+            language: string | null;
+            url: string;
+          }>;
+        }>;
+        brief?: {
+          requiredSkills?: string[];
+          preferredLocation?: string;
+          minExperience?: string;
+          projectType?: string;
+        };
+        error?: string;
+        failedProfiles?: Array<{ username: string; error: string }>;
+      };
+
+      if (data.error) {
+        return (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 space-y-2">
+            <p className="text-red-400">{data.error}</p>
+            {data.failedProfiles && data.failedProfiles.length > 0 && (
+              <details className="text-xs text-red-300/70">
+                <summary className="cursor-pointer hover:text-red-300">Show failed profiles ({data.failedProfiles.length})</summary>
+                <ul className="mt-2 space-y-1 pl-4">
+                  {data.failedProfiles.slice(0, 5).map((fp) => (
+                    <li key={fp.username}>@{fp.username}: {fp.error}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        );
+      }
+
+      if (!data.candidates || data.candidates.length === 0) {
+        return (
+          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
+            <p className="text-yellow-400">No candidates could be evaluated. Try searching for more profiles first.</p>
+          </div>
+        );
+      }
+
+      const candidates = data.candidates;
+
+      return (
+        <div className="space-y-2">
+          {candidates.map((candidate) => (
+            <ExpandableProfileCard key={candidate.username} candidate={candidate} />
+          ))}
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -331,25 +531,11 @@ function AISearchContent() {
           { href: "/", label: "Home" },
         ]}
         showSignIn
+        user={user}
       />
 
       {/* Main Chat Area */}
       <main className="relative z-10 flex-1 flex flex-col container mx-auto px-4 md:px-6 pt-8 pb-4 max-w-4xl">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <Brain className="h-8 w-8 text-emerald-400" />
-            <h1 className="text-2xl md:text-3xl font-bold">
-              <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                AI Developer Search
-              </span>
-            </h1>
-          </div>
-          <p className="text-muted-foreground">
-            Find developers using natural language. Try &quot;best React developers in London&quot;
-          </p>
-        </div>
-
         {/* Messages */}
         <div className="flex-1 overflow-y-auto space-y-4 mb-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
           {messages.length === 0 && (
@@ -376,6 +562,46 @@ function AISearchContent() {
                   </button>
                 ))}
               </div>
+
+              {/* Recent Searches Section */}
+              {!loadingRecent && recentSearches.length > 0 && (
+                <div className="mt-12 text-left max-w-2xl mx-auto">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                    <Clock className="h-4 w-4" />
+                    <span>Recently Viewed Profiles</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {recentSearches.map((search) => (
+                      <Link
+                        key={search.id}
+                        href={`/analyze/${search.githubUsername}`}
+                        className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                      >
+                        <img
+                          src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
+                          alt={search.githubUsername}
+                          className="w-10 h-10 rounded-full border border-white/20"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-white truncate">
+                              {search.githubName || search.githubUsername}
+                            </span>
+                            <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
+                          {search.githubLocation && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                              <MapPin className="h-3 w-3" />
+                              <span className="truncate">{search.githubLocation}</span>
+                            </div>
+                          )}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -385,11 +611,6 @@ function AISearchContent() {
               className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"
                 }`}
             >
-              {message.role === "assistant" && (
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
-                  <Brain className="h-4 w-4 text-white" />
-                </div>
-              )}
               <div
                 className={`max-w-[80%] ${message.role === "user"
                     ? "bg-emerald-600/20 border border-emerald-500/30 rounded-2xl rounded-tr-md px-4 py-3"
@@ -400,35 +621,43 @@ function AISearchContent() {
                   <p className="text-white">{getMessageText(message)}</p>
                 ) : (
                   <>
+                    {/* Reasoning parts - only show while thinking */}
+                    {getReasoningParts(message)
+                      .filter((part) => part.state === "thinking")
+                      .map((part, i) => (
+                        <div
+                          key={`reasoning-${i}`}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-muted-foreground"
+                        >
+                          <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+                          <span className="italic truncate">{part.text}</span>
+                        </div>
+                      ))}
                     {/* Tool invocations */}
                     {getToolParts(message).map((part, i) => {
                       const toolName = getToolName(part.type);
                       const hasResult = part.state === "result" || part.state === "output-available";
+                      // AI SDK v4 may use 'output' or 'result' depending on the state
+                      const toolResult = part.output ?? part.result;
 
                       return (
                         <div key={i} className="space-y-2">
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            {hasResult ? (
-                              <>
-                                <Search className="h-3 w-3" />
-                                <span>
-                                  {toolName === "searchGitHubProfiles"
-                                    ? "Searched for profiles"
-                                    : "Analyzed profile"}
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>
-                                  {toolName === "searchGitHubProfiles"
-                                    ? `Searching for "${(part.input as { query?: string })?.query || 'profiles'}"...`
-                                    : `Analyzing ${(part.input as { username?: string })?.username || 'profile'}...`}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                          {hasResult && part.result && renderToolResult(toolName, part.result)}
+                          {hasResult ? (
+                            <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates"}>
+                              {toolResult != null && renderToolResult(toolName, toolResult)}
+                            </CollapsibleToolResult>
+                          ) : (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>
+                                {toolName === "searchGitHubProfiles"
+                                  ? `Searching for "${(part.input as { query?: string })?.query || 'profiles'}"...`
+                                  : toolName === "getTopCandidates"
+                                  ? `Ranking ${(part.input as { usernames?: string[] })?.usernames?.length || 0} candidates...`
+                                  : `Analyzing ${(part.input as { username?: string })?.username || 'profile'}...`}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -443,10 +672,15 @@ function AISearchContent() {
                   </>
                 )}
               </div>
-              {message.role === "user" && (
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-                  <User className="h-4 w-4 text-white" />
-                </div>
+              {/* Per-message debug button - Dev only */}
+              {isDev && (
+                <button
+                  onClick={() => setDebugMessageId(debugMessageId === message.id ? null : message.id)}
+                  className="flex-shrink-0 self-start p-1 rounded text-yellow-500/50 hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+                  title="Debug this message"
+                >
+                  <Bug className="h-3 w-3" />
+                </button>
               )}
             </div>
           ))}
@@ -493,6 +727,35 @@ function AISearchContent() {
           </div>
         </form>
       </main>
+
+      {/* Debug Modal - Dev only */}
+      {isDev && debugMessageId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDebugMessageId(null)}>
+          <div className="relative w-full max-w-4xl max-h-[80vh] m-4 bg-zinc-900 border border-white/10 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Bug className="h-5 w-5 text-yellow-400" />
+                Debug: Message Parts
+              </h2>
+              <button
+                onClick={() => setDebugMessageId(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-auto max-h-[calc(80vh-60px)] custom-scrollbar">
+              <pre className="text-xs text-emerald-300 whitespace-pre-wrap font-mono">
+                {JSON.stringify(
+                  messages.find((m) => m.id === debugMessageId),
+                  null,
+                  2
+                )}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

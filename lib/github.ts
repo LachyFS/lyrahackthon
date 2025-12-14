@@ -2,6 +2,7 @@ import { db } from "@/src/db";
 import { profiles } from "@/src/db/schema";
 import { eq } from "drizzle-orm";
 import type { User } from "@supabase/supabase-js";
+import { getCached, setCache } from "./redis";
 
 interface GitHubUser {
   id: number;
@@ -26,6 +27,12 @@ interface GitHubRepo {
 }
 
 export async function fetchGitHubUser(token: string): Promise<GitHubUser> {
+  const cacheKey = `github:user:${token.slice(-8)}`;
+  const cached = await getCached<GitHubUser>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const response = await fetch("https://api.github.com/user", {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -37,13 +44,21 @@ export async function fetchGitHubUser(token: string): Promise<GitHubUser> {
     throw new Error("Failed to fetch GitHub user");
   }
 
-  return response.json();
+  const user = await response.json();
+  await setCache(cacheKey, user);
+  return user;
 }
 
 export async function fetchGitHubRepos(
   token: string,
   username: string
 ): Promise<GitHubRepo[]> {
+  const cacheKey = `github:repos:${username}`;
+  const cached = await getCached<GitHubRepo[]>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const response = await fetch(
     `https://api.github.com/users/${username}/repos?per_page=100&sort=pushed`,
     {
@@ -58,7 +73,9 @@ export async function fetchGitHubRepos(
     return [];
   }
 
-  return response.json();
+  const repos = await response.json();
+  await setCache(cacheKey, repos);
+  return repos;
 }
 
 export function calculateTopLanguages(

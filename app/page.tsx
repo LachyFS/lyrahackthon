@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { signInWithGitHub } from "@/lib/actions/auth";
+import { signInWithGitHub, getUser } from "@/lib/actions/auth";
 import {
   Search,
   GithubIcon,
@@ -20,7 +20,9 @@ import { SearchForm } from "@/components/search-form";
 import { GitSignalLogoWave } from "@/components/gitsignal-logo";
 import { SiteHeader } from "@/components/site-header";
 
-export default function Home() {
+export default async function Home() {
+  const user = await getUser();
+
   return (
     <div className="relative mx-auto min-h-screen overflow-hidden bg-background">
       {/* Background effects */}
@@ -39,6 +41,7 @@ export default function Home() {
           { href: "#how-it-works", label: "How it works" },
         ]}
         showSignIn
+        user={user}
       />
 
       <main className="relative z-10 mx-auto">

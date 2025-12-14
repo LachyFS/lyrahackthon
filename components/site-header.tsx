@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { GithubIcon, ArrowLeft, ExternalLink } from "lucide-react";
+import { GithubIcon, ArrowLeft, ExternalLink, LogOut } from "lucide-react";
 import { GitSignalLogoWave } from "@/components/gitsignal-logo";
-import { signInWithGitHub } from "@/lib/actions/auth";
+import { signInWithGitHub, signOut } from "@/lib/actions/auth";
 import { ReactNode } from "react";
+import { User } from "@supabase/supabase-js";
 
 interface NavLink {
   href: string;
@@ -31,8 +32,10 @@ interface SiteHeaderProps {
   rightLabel?: string;
   /** External link button to show on the right */
   externalLink?: ExternalLinkAction;
-  /** Whether to show the sign in button */
+  /** Whether to show the sign in button (only shown if user is not logged in) */
   showSignIn?: boolean;
+  /** The currently authenticated user */
+  user?: User | null;
   /** Custom right side content */
   rightContent?: ReactNode;
   /** Whether to use compact height (h-14 vs h-16) */
@@ -45,6 +48,7 @@ export function SiteHeader({
   rightLabel,
   externalLink,
   showSignIn = false,
+  user,
   rightContent,
   compact = false,
 }: SiteHeaderProps) {
@@ -110,13 +114,39 @@ export function SiteHeader({
             </a>
           )}
 
-          {showSignIn && (
+          {showSignIn && !user && (
             <form action={signInWithGitHub}>
               <Button className="bg-white text-black hover:bg-white/90 font-medium">
                 <GithubIcon className="mr-2 h-4 w-4" />
                 Sign in
               </Button>
             </form>
+          )}
+
+          {user && (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                {user.user_metadata?.avatar_url && (
+                  <img
+                    src={user.user_metadata.avatar_url}
+                    alt={user.user_metadata?.user_name || "User"}
+                    className="h-8 w-8 rounded-full border border-white/10"
+                  />
+                )}
+                <span className="text-sm text-muted-foreground hidden sm:inline">
+                  {user.user_metadata?.user_name || user.email}
+                </span>
+              </div>
+              <form action={signOut}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-white"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </form>
+            </div>
           )}
 
           {rightContent}

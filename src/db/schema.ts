@@ -183,6 +183,34 @@ export const wishlists = devshowcase.table(
 );
 
 // ============================================
+// SEARCH HISTORY - Discovered/searched GitHub accounts
+// ============================================
+export const searchHistory = devshowcase.table(
+  "search_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Link to Supabase Auth user (who performed the search)
+    authUserId: uuid("auth_user_id").notNull(),
+    // Searched GitHub account info
+    githubUsername: varchar("github_username", { length: 255 }).notNull(),
+    githubName: text("github_name"),
+    githubAvatarUrl: text("github_avatar_url"),
+    githubBio: text("github_bio"),
+    githubLocation: text("github_location"),
+    // Search context
+    searchQuery: text("search_query"), // The original search query
+    searchType: varchar("search_type", { length: 50 }).default("ai_search"), // 'ai_search', 'direct', 'analyze'
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("search_history_auth_user_id_idx").on(table.authUserId),
+    index("search_history_github_username_idx").on(table.githubUsername),
+    index("search_history_created_at_idx").on(table.createdAt),
+  ]
+);
+
+// ============================================
 // COMMENTS - Post comments
 // ============================================
 export const comments = devshowcase.table(
@@ -285,3 +313,5 @@ export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
 export type Wishlist = typeof wishlists.$inferSelect;
 export type NewWishlist = typeof wishlists.$inferInsert;
+export type SearchHistory = typeof searchHistory.$inferSelect;
+export type NewSearchHistory = typeof searchHistory.$inferInsert;
