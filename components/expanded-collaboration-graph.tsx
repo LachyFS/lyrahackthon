@@ -682,11 +682,11 @@ function CollaborationGraphInner({
         </div>
       </div>
 
-      {/* Graph - Obsidian-style dark canvas */}
-      <div className={fullscreen ? "flex-1 bg-[#1a1a2e] relative" : "h-[700px] bg-[#1a1a2e] relative"}>
+      {/* Graph - Modern dark canvas with subtle gradient */}
+      <div className={fullscreen ? "flex-1 relative" : "h-[700px] relative"} style={{ background: 'radial-gradient(ellipse at center, #0f172a 0%, #020617 50%, #000000 100%)' }}>
         {/* Loading overlay */}
         {isLoading && (
-          <div className="absolute inset-0 bg-[#1a1a2e]/90 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
               <span className="text-sm text-muted-foreground">Loading network...</span>
@@ -715,7 +715,7 @@ function CollaborationGraphInner({
           proOptions={{ hideAttribution: true }}
           connectionMode={ConnectionMode.Loose}
         >
-          <Background color="#2a2a4a" gap={25} variant={BackgroundVariant.Dots} size={1} />
+          <Background color="#1e293b" gap={20} variant={BackgroundVariant.Dots} size={1.5} />
           <Controls
             showInteractive={false}
             className="!bg-white/10 !border-white/10 !shadow-none [&>button]:!bg-white/10 [&>button]:!border-white/10 [&>button]:!text-white [&>button:hover]:!bg-white/20"

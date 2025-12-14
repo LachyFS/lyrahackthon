@@ -509,7 +509,37 @@ async function fetchCollaborationDataGraphQL(
   }
 
   // Process owned repositories and their contributors
-  for (const repo of user.repositories.nodes) {
+  // If > 4 repos, filter out forks and repos with no contributors, sorted by stars
+  let ownedRepos = user.repositories.nodes;
+
+  if (ownedRepos.length > 4) {
+    // Filter: keep repos that have contributors OR are not forks
+    // Then prioritize repos with contributors and sort by stars
+    const reposWithContributorInfo = ownedRepos.map(repo => {
+      const hasContributors = repo.mentionableUsers.nodes.some(
+        c => c.login.toLowerCase() !== username.toLowerCase()
+      );
+      return { repo, hasContributors };
+    });
+
+    // Filter out forks with no contributors
+    const filteredRepos = reposWithContributorInfo.filter(
+      ({ repo, hasContributors }) => hasContributors || !repo.isFork
+    );
+
+    // Sort by: has contributors first, then by stars
+    filteredRepos.sort((a, b) => {
+      // Repos with contributors come first
+      if (a.hasContributors && !b.hasContributors) return -1;
+      if (!a.hasContributors && b.hasContributors) return 1;
+      // Then sort by stars
+      return b.repo.stargazerCount - a.repo.stargazerCount;
+    });
+
+    ownedRepos = filteredRepos.map(({ repo }) => repo);
+  }
+
+  for (const repo of ownedRepos) {
     if (seenRepos.has(repo.nameWithOwner.toLowerCase())) continue;
     seenRepos.add(repo.nameWithOwner.toLowerCase());
 
@@ -649,17 +679,11 @@ async function fetchCollaborationDataREST(
     }
   }
 
-  // Get repos sorted by activity and stars - increased limit to 30
-  const activeRepos = repos
-    .sort((a, b) => {
-      const aScore = a.stargazers_count * 2 + a.forks_count;
-      const bScore = b.stargazers_count * 2 + b.forks_count;
-      return bScore - aScore;
-    })
-    .slice(0, 30);
+  // Get repos sorted by stars
+  const sortedRepos = [...repos].sort((a, b) => b.stargazers_count - a.stargazers_count);
 
   // Fetch contributors from repos in parallel - increased to 15 per repo
-  const contributorPromises = activeRepos.map(async (repo) => {
+  const contributorPromises = sortedRepos.slice(0, 30).map(async (repo) => {
     try {
       const contributors = await fetchGitHub<Array<{ login: string; avatar_url: string; contributions: number }>>(
         `/repos/${repo.full_name}/contributors?per_page=15`,
@@ -673,8 +697,35 @@ async function fetchCollaborationDataREST(
 
   const repoContributors = await Promise.all(contributorPromises);
 
+  // If > 4 repos, filter out forks and repos with no contributors, sorted by stars
+  let filteredRepoContributors = repoContributors;
+
+  if (repoContributors.length > 4) {
+    // Annotate with contributor info
+    const annotated = repoContributors.map(({ repo, contributors }) => {
+      const hasContributors = contributors.some(
+        c => c.login.toLowerCase() !== username.toLowerCase() && c.contributions >= 1
+      );
+      return { repo, contributors, hasContributors };
+    });
+
+    // Filter out forks with no contributors
+    const filtered = annotated.filter(
+      ({ repo, hasContributors }) => hasContributors || !repo.fork
+    );
+
+    // Sort by: has contributors first, then by stars
+    filtered.sort((a, b) => {
+      if (a.hasContributors && !b.hasContributors) return -1;
+      if (!a.hasContributors && b.hasContributors) return 1;
+      return b.repo.stargazers_count - a.repo.stargazers_count;
+    });
+
+    filteredRepoContributors = filtered;
+  }
+
   // Process repos and their contributors
-  for (const { repo, contributors } of repoContributors) {
+  for (const { repo, contributors } of filteredRepoContributors) {
     const otherContributors = contributors.filter(
       c => c.login.toLowerCase() !== username.toLowerCase() && c.contributions >= 1
     );
@@ -689,6 +740,7 @@ async function fetchCollaborationDataREST(
         stars: repo.stargazers_count,
         language: repo.language,
         owner: username,
+        isFork: repo.fork,
       });
 
       connections.push({
