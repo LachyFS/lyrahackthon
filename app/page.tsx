@@ -55,7 +55,7 @@ export default function Home() {
               <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
                 without the jargon
               </span>
-            </h>
+            </h1>
 
             {/* Subheading */}
             <p className="animate-slide-up opacity-0 delay-200 text-lg md:text-xl text-muted-foreground max-w-2xl mb-10">
