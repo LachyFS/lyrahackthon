@@ -78,7 +78,7 @@ async function NetworkContent({ username }: { username: string }) {
       />
 
       {/* Floating Side Panel */}
-      <div className="absolute top-[4.5rem] left-4 z-50 w-80 max-h-[calc(100vh-5.5rem)] overflow-y-auto">
+      <div className="absolute top-[4.5rem] left-4 z-50 w-80 max-h-[calc(100vh-5.5rem)] overflow-y-auto custom-scrollbar">
         <div className="rounded-2xl border border-white/10 bg-background/90 backdrop-blur-xl shadow-2xl">
           {/* User Profile */}
           <div className="p-4 border-b border-white/5">
