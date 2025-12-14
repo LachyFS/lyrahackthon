@@ -49,7 +49,7 @@ export default function Home() {
             {/* Main heading */}
             <h1 className="animate-slide-up opacity-0 delay-100 text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-b from-white via-white to-white/50 bg-clip-text text-transparent">
-                Understand developers
+                Understand hawk tuah
               </span>
               <br />
               <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
