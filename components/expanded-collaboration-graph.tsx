@@ -336,7 +336,7 @@ function CollaborationGraphInner({
     const simNodes = nodes.map(n => ({ ...n }));
     simNodesRef.current = simNodes;
 
-    // Obsidian-style force simulation - softer, more organic
+    // Optimized force simulation - faster settling, no continuous animation
     const simulation = d3.forceSimulation<SimNode>(simNodes)
       // Link force - elastic connections like springs
       .force("link", d3.forceLink<SimNode, d3.SimulationLinkDatum<SimNode>>(links)
@@ -344,77 +344,73 @@ function CollaborationGraphInner({
         .distance((link) => {
           const source = link.source as SimNode;
           const target = link.target as SimNode;
-          // Longer distances for better spacing
-          if (source.isCenter || target.isCenter) return 200; // Center to repo
-          if (source.type === "repo" || target.type === "repo") return 180; // Repo to collaborator
-          return 250; // Default
+          if (source.isCenter || target.isCenter) return 180;
+          if (source.type === "repo" || target.type === "repo") return 150;
+          return 200;
         })
-        .strength(0.4)) // Slightly stronger for better structure
-      // Charge force - nodes repel each other more
+        .strength(0.6))
+      // Charge force - nodes repel each other
       .force("charge", d3.forceManyBody<SimNode>()
         .strength((d) => {
-          if (d.isCenter) return -800; // Strong repulsion from center
-          if (d.type === "repo") return -400;
-          return -300; // Stronger repulsion for spacing
+          if (d.isCenter) return -600;
+          if (d.type === "repo") return -300;
+          return -200;
         })
-        .distanceMax(600)) // Larger repulsion range
-      // Collision - prevent overlapping with more space
+        .distanceMax(400))
+      // Collision - prevent overlapping
       .force("collision", d3.forceCollide<SimNode>()
         .radius((d) => {
-          if (d.isCenter) return 80;
-          if (d.type === "repo") return 70;
-          return 60;
+          if (d.isCenter) return 60;
+          if (d.type === "repo") return 50;
+          return 40;
         })
-        .strength(0.8))
-      // Gentle centering force - keeps graph from drifting away
-      .force("center", d3.forceCenter(450, 350).strength(0.03))
-      // Very gentle x/y positioning to prevent extreme drift
-      .force("x", d3.forceX(450).strength(0.01))
-      .force("y", d3.forceY(350).strength(0.01))
-      // Velocity decay - how quickly nodes slow down (lower = more floaty)
-      .velocityDecay(0.4)
-      // Alpha decay - how quickly simulation settles (lower = longer animation)
-      .alphaDecay(0.01)
-      // Minimum alpha - simulation keeps running gently
-      .alphaMin(0.001)
-      .alphaTarget(0.02); // Keep a tiny bit of movement always (Obsidian-style)
+        .strength(0.7))
+      // Centering force
+      .force("center", d3.forceCenter(450, 350).strength(0.05))
+      // Faster settling for better performance
+      .velocityDecay(0.6)
+      .alphaDecay(0.05)
+      .alphaMin(0.01)
+      .alphaTarget(0); // Stop when settled
 
     simulationRef.current = simulation;
 
-    // Update positions on each tick
+    // Throttle position updates to reduce re-renders (update every 2 ticks)
+    let tickCount = 0;
     simulation.on("tick", () => {
+      tickCount++;
+      if (tickCount % 2 !== 0 && simulation.alpha() > 0.1) return; // Skip every other tick while hot
+
       const positions = new Map<string, { x: number; y: number }>();
       simNodes.forEach((node) => {
         positions.set(node.id, { x: node.x || 450, y: node.y || 350 });
       });
-      setSimulatedPositions(new Map(positions));
+      setSimulatedPositions(positions);
     });
 
-    // Start simulation
-    simulation.alpha(1).restart();
+    // Start simulation with lower initial alpha for faster settling
+    simulation.alpha(0.8).restart();
 
     return () => {
       simulation.stop();
     };
   }, [graphData]);
 
-  // Handle node drag - Obsidian-style interactive dragging
+  // Handle node drag
   const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
     isDraggingRef.current = node.id;
     const simNode = simNodesRef.current.find(n => n.id === node.id);
     if (simNode && simulationRef.current) {
-      // Fix the node position while dragging
       simNode.fx = simNode.x;
       simNode.fy = simNode.y;
-      // Reheat the simulation for responsive dragging
-      simulationRef.current.alphaTarget(0.3).restart();
+      // Gentle reheat for dragging
+      simulationRef.current.alphaTarget(0.1).restart();
     }
   }, []);
 
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
     const simNode = simNodesRef.current.find(n => n.id === node.id);
     if (simNode) {
-      // Update fixed position to follow drag
       simNode.fx = node.position.x;
       simNode.fy = node.position.y;
     }
@@ -424,11 +420,10 @@ function CollaborationGraphInner({
     isDraggingRef.current = null;
     const simNode = simNodesRef.current.find(n => n.id === node.id);
     if (simNode && simulationRef.current) {
-      // Release the node - let it float again
       simNode.fx = null;
       simNode.fy = null;
-      // Cool down the simulation gradually
-      simulationRef.current.alphaTarget(0.02);
+      // Stop the simulation when drag ends
+      simulationRef.current.alphaTarget(0);
     }
   }, []);
 

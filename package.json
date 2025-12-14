@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
+    "db:push": "dotenv -e .env.migrations -- drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
@@ -47,6 +47,7 @@
     "@supabase/supabase-js": "^2.87.1",
     "@tailwindcss/typography": "^0.5.19",
     "@types/d3": "^7.4.3",
+    "@upstash/redis": "^1.35.8",
     "@xyflow/react": "^12.10.0",
     "ai": "^5.0.113",
     "class-variance-authority": "^0.7.1",
@@ -80,6 +81,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.8",
     "eslint": "^9",
     "eslint-config-next": "16.0.8",

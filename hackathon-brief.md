@@ -2,23 +2,23 @@
 # Background
 The technology industry is experiencing an unprecedented talent shortage. As AI capabilities accelerate and tech companies race to build the next generation of products, the competition for engineering talent has reached fever pitch.
 
-The Numbers Tell the Story
+## The Numbers Tell the Story
 Sign-on bonuses at leading AI labs now regularly exceed $1-2M for top researchers, with some packages reaching $5-10M for exceptional talent
 OpenAI, Anthropic, Google DeepMind, and Meta are engaged in aggressive talent acquisition, often poaching entire research teams
 The global developer shortage is projected to reach 85 million workers by 2030
 Time-to-hire for senior engineers averages 49 days, with companies losing top candidates to competitors during lengthy processes
 73% of recruiters say finding qualified tech talent is their biggest challenge
 
-The War on Multiple Fronts
+## The War on Multiple Fronts
 This isn't just about AI researchers. The talent war extends across the entire tech ecosystem:
 
-For Companies:
+### For Companies:
 Sourcing quality candidates from an ever-shrinking pool
 Competing with tech giants offering unprecedented compensation
 Identifying genuine skill vs. credential inflation
 Reducing time-to-hire while maintaining quality
 Managing candidate experience in a candidate-driven market
-For Candidates:
+### For Candidates:
 Drowning in recruiter spam and irrelevant opportunities
 Difficulty finding roles that match their actual skills and ambitions
 Lack of transparency around compensation, culture, and growth
@@ -29,7 +29,7 @@ Talent concentrated in a handful of companies
 Promising startups unable to compete for mid-senior talent
 
 
-The Challenge
+## The Challenge
 Build a working tool that fundamentally changes how tech talent and opportunities connect.
 Your solution should address one or more aspects of the recruiting problem. This could be:
 Sourcing & Discovery
