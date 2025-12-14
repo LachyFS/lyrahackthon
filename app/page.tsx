@@ -17,6 +17,8 @@ import {
   GitCommit,
 } from "lucide-react";
 import { SearchForm } from "@/components/search-form";
+import { GitSignalLogoWave } from "@/components/gitsignal-logo";
+import { SiteHeader } from "@/components/site-header";
 
 export default function Home() {
   return (
@@ -31,35 +33,13 @@ export default function Home() {
       <div className="fixed bottom-[-10%] left-[30%] w-[400px] h-[400px] rounded-full bg-blue-500/15 animate-pulse-glow blur-3xl delay-400" />
 
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
-            <div className="relative">
-              <BarChart3 className="h-6 w-6 text-emerald-400 transition-transform group-hover:scale-110" />
-              <div className="absolute inset-0 blur-lg bg-emerald-400/50 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              GitSignal
-            </span>
-          </Link>
-
-          <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
-            <Link href="#features" className="hover:text-white transition-colors">
-              Features
-            </Link>
-            <Link href="#how-it-works" className="hover:text-white transition-colors">
-              How it works
-            </Link>
-          </nav>
-
-          <form action={signInWithGitHub}>
-            <Button className="bg-white text-black hover:bg-white/90 font-medium">
-              <GithubIcon className="mr-2 h-4 w-4" />
-              Sign in
-            </Button>
-          </form>
-        </div>
-      </header>
+      <SiteHeader
+        navLinks={[
+          { href: "#features", label: "Features" },
+          { href: "#how-it-works", label: "How it works" },
+        ]}
+        showSignIn
+      />
 
       <main className="relative z-10 mx-auto">
         {/* Hero Section */}
@@ -356,7 +336,7 @@ export default function Home() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <BarChart3 className="h-4 w-4" />
+              <GitSignalLogoWave className="h-5 w-5" />
               <span>GitSignal</span>
               <span className="mx-2">·</span>
               <span>Developer insights for hiring managers</span>

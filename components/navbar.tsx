@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/lib/actions/auth";
 import { CreatePostForm } from "./create-post-form";
-import { Code2, Compass, Home, User, LogOut, Sparkles } from "lucide-react";
+import { Code2, Compass, Home, User, LogOut, Sparkles, LogIn } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export async function Navbar() {
   const supabase = await createClient();
@@ -61,6 +62,10 @@ export async function Navbar() {
         <div className="flex items-center gap-2">
           {user && profile ? (
             <>
+              <Badge variant="secondary" className="hidden sm:flex items-center gap-1.5 text-xs">
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+                Signed in
+              </Badge>
               <CreatePostForm />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -71,6 +76,7 @@ export async function Navbar() {
                         {profile.name?.[0] ?? profile.githubUsername[0]}
                       </AvatarFallback>
                     </Avatar>
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -103,7 +109,10 @@ export async function Navbar() {
             </>
           ) : (
             <Button asChild>
-              <Link href="/login">Sign in with GitHub</Link>
+              <Link href="/login" className="flex items-center gap-2">
+                <LogIn className="h-4 w-4" />
+                Sign in with GitHub
+              </Link>
             </Button>
           )}
         </div>
