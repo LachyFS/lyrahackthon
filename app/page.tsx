@@ -49,18 +49,18 @@ export default function Home() {
             {/* Main heading */}
             <h1 className="animate-slide-up opacity-0 delay-100 text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-b from-white via-white to-white/50 bg-clip-text text-transparent">
-                Understand hawk tu
+                Decode developer talent
               </span>
               <br />
               <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
-                without the jargon
+                without the tech speak
               </span>
             </h1>
 
             {/* Subheading */}
             <p className="animate-slide-up opacity-0 delay-200 text-lg md:text-xl text-muted-foreground max-w-2xl mb-10">
-              GitSignal translates GitHub profiles into clear, actionable insights
-              for non-technical hiring managers. Know who you&apos;re hiring.
+              GitSignal transforms complex GitHub profiles into plain-English insights.
+              Make confident hiring decisions—no technical background required.
             </p>
 
             {/* Search Form */}
@@ -160,10 +160,10 @@ export default function Home() {
               Features
             </Badge>
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Hiring insights, simplified
+              Technical vetting made simple
             </h2>
             <p className="text-muted-foreground">
-              Everything you need to evaluate technical candidates, even without a technical background.
+              Understand a developer&apos;s real skills, experience, and work style—all from their GitHub activity.
             </p>
           </div>
 
@@ -171,44 +171,44 @@ export default function Home() {
             {[
               {
                 icon: Brain,
-                title: "AI-Powered Analysis",
+                title: "AI-Powered Summaries",
                 description:
-                  "Our AI translates complex GitHub data into plain English summaries that anyone can understand.",
+                  "Get clear, jargon-free explanations of what a developer actually does and how skilled they are.",
                 gradient: "from-emerald-500 to-teal-500",
               },
               {
                 icon: BarChart3,
-                title: "Activity Metrics",
+                title: "Activity Insights",
                 description:
-                  "See coding frequency, contribution patterns, and project involvement at a glance.",
+                  "See how often they code, when they&apos;re most active, and whether they ship consistently.",
                 gradient: "from-cyan-500 to-blue-500",
               },
               {
                 icon: Code2,
-                title: "Skill Detection",
+                title: "Tech Stack Detection",
                 description:
-                  "Automatically identify programming languages, frameworks, and tools the developer uses.",
+                  "Instantly see which languages and technologies they use most—matched to your job requirements.",
                 gradient: "from-blue-500 to-indigo-500",
               },
               {
                 icon: TrendingUp,
-                title: "Experience Estimation",
+                title: "Experience Level",
                 description:
-                  "Understand their experience level based on account age, project complexity, and growth patterns.",
+                  "Gauge seniority from their coding history, project complexity, and how their skills have grown.",
                 gradient: "from-purple-500 to-pink-500",
               },
               {
                 icon: Users,
-                title: "Collaboration Signals",
+                title: "Team Player Signals",
                 description:
-                  "See how they work with others through pull requests, issues, and open source contributions.",
+                  "Discover how they collaborate—do they contribute to open source, review code, or work solo?",
                 gradient: "from-pink-500 to-rose-500",
               },
               {
                 icon: Shield,
-                title: "Red Flag Detection",
+                title: "Red Flag Alerts",
                 description:
-                  "Identify potential concerns like inactive accounts, abandoned projects, or inconsistent activity.",
+                  "Spot warning signs like long gaps in activity, abandoned projects, or inflated contribution counts.",
                 gradient: "from-orange-500 to-amber-500",
               },
             ].map((feature, i) => (
@@ -250,10 +250,10 @@ export default function Home() {
                 How it works
               </Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                Analyze any developer in seconds
+                From GitHub profile to hiring insight in seconds
               </h2>
               <p className="text-muted-foreground">
-                Three simple steps to understand a candidate&apos;s technical background.
+                No technical expertise needed. Just enter a username and let GitSignal do the rest.
               </p>
             </div>
 
@@ -261,23 +261,23 @@ export default function Home() {
               {[
                 {
                   step: "01",
-                  title: "Enter Username",
+                  title: "Paste a GitHub Username",
                   description:
-                    "Just paste a GitHub username or profile URL. No account needed to search.",
+                    "Enter any developer&apos;s GitHub username or profile URL—no signup required to get started.",
                   icon: Search,
                 },
                 {
                   step: "02",
-                  title: "We Analyze",
+                  title: "We Do the Heavy Lifting",
                   description:
-                    "GitSignal scans their repositories, contributions, and activity patterns.",
+                    "GitSignal analyzes their repositories, commit history, contributions, and coding patterns.",
                   icon: Zap,
                 },
                 {
                   step: "03",
-                  title: "Get Insights",
+                  title: "Review Your Report",
                   description:
-                    "Receive a clear, jargon-free report with everything you need to make a decision.",
+                    "Get a clear summary with skills, experience level, work habits, and any red flags to watch for.",
                   icon: BarChart3,
                 },
               ].map((item, i) => (
@@ -323,10 +323,10 @@ export default function Home() {
               <div className="absolute bottom-0 right-0 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl" />
 
               <h2 className="relative text-3xl md:text-4xl font-bold mb-4">
-                Ready to make better hiring decisions?
+                Stop guessing. Start hiring with confidence.
               </h2>
               <p className="relative text-muted-foreground max-w-xl mx-auto mb-8">
-                Sign in with GitHub for higher rate limits and to save your analyzed profiles.
+                Sign in with GitHub to unlock higher rate limits, save candidate profiles, and build your shortlist.
               </p>
               <form action={signInWithGitHub} className="relative">
                 <Button
@@ -351,7 +351,7 @@ export default function Home() {
               <GitSignalLogoWave className="h-5 w-5" />
               <span>GitSignal</span>
               <span className="mx-2">·</span>
-              <span>Developer insights for hiring managers</span>
+              <span>Technical hiring insights for everyone</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
               <Link href="#" className="hover:text-white transition-colors">
