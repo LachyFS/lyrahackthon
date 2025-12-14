@@ -383,7 +383,6 @@ async function fetchCollaborationData(
       const bScore = b.stargazers_count * 2 + b.forks_count;
       return bScore - aScore;
     })
-    .slice(0, 6);
 
   // Fetch contributors from repos in parallel
   const contributorPromises = activeRepos.map(async (repo) => {
@@ -429,7 +428,7 @@ async function fetchCollaborationData(
       });
 
       // Add contributors and connect them to repo
-      for (const contributor of otherContributors.slice(0, 5)) {
+      for (const contributor of otherContributors) {
         const lowerLogin = contributor.login.toLowerCase();
 
         // Connect contributor to repo
