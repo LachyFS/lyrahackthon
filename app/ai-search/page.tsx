@@ -22,7 +22,9 @@ import {
   X,
   ChevronDown,
   Clock,
+  ArrowDown,
 } from "lucide-react";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { SiteHeader } from "@/components/site-header";
 import { GitSignalLogoWave } from "@/components/gitsignal-logo";
 import Link from "next/link";
@@ -31,6 +33,8 @@ import ReactMarkdown from "react-markdown";
 import { createClient } from "@/lib/supabase/client";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { ExpandableProfileCard } from "@/components/expandable-profile-card";
+import { EmailDraft } from "@/components/email-draft";
+import { motion, AnimatePresence } from "framer-motion";
 
 // Types for message parts
 interface TextPart {
@@ -76,6 +80,23 @@ interface RecentSearch {
   createdAt: string;
 }
 
+// Scroll to bottom button that appears when not at bottom
+function ScrollToBottomButton() {
+  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+
+  if (isAtBottom) return null;
+
+  return (
+    <button
+      onClick={() => scrollToBottom()}
+      className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 p-2 rounded-full bg-emerald-600/80 hover:bg-emerald-500 text-white shadow-lg transition-all duration-200 backdrop-blur-sm border border-emerald-500/30"
+      aria-label="Scroll to bottom"
+    >
+      <ArrowDown className="h-4 w-4" />
+    </button>
+  );
+}
+
 // Collapsible wrapper for tool results with auto-collapse
 function CollapsibleToolResult({
   toolName,
@@ -108,6 +129,8 @@ function CollapsibleToolResult({
         return "Profile Analysis";
       case "getTopCandidates":
         return "Reviewed Candidates";
+      case "generateDraftEmail":
+        return "Email Draft";
       default:
         return "Tool Result";
     }
@@ -138,7 +161,6 @@ function CollapsibleToolResult({
 function AISearchContent() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get("q");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasSubmittedInitialRef = useRef(false);
   const [inputValue, setInputValue] = useState("");
   const [debugMessageId, setDebugMessageId] = useState<string | null>(null);
@@ -204,20 +226,6 @@ function AISearchContent() {
       .join("");
   };
 
-  // Helper to get tool parts from message parts
-  const getToolParts = (message: ChatMessage): ToolPart[] => {
-    return message.parts.filter(
-      (part): part is ToolPart => part.type.startsWith("tool-")
-    );
-  };
-
-  // Helper to get reasoning parts from message parts
-  const getReasoningParts = (message: ChatMessage): ReasoningPart[] => {
-    return message.parts.filter(
-      (part): part is ReasoningPart => part.type === "reasoning"
-    );
-  };
-
   // Extract tool name from type (e.g., "tool-searchGitHubProfiles" -> "searchGitHubProfiles")
   const getToolName = (toolType: string): string => {
     return toolType.replace("tool-", "");
@@ -245,6 +253,10 @@ function AISearchContent() {
         );
       }
 
+      const maxVisible = 5;
+      const visibleProfiles = data.profiles.slice(0, maxVisible);
+      const remainingCount = data.profiles.length - maxVisible;
+
       return (
         <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -252,7 +264,7 @@ function AISearchContent() {
             <span>Found {data.total} profiles for &quot;{data.query}&quot;</span>
           </div>
           <div className="space-y-2">
-            {data.profiles.map((profile, i) => (
+            {visibleProfiles.map((profile, i) => (
               <div
                 key={i}
                 className="flex items-center gap-3 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
@@ -275,6 +287,11 @@ function AISearchContent() {
                 </div>
               </div>
             ))}
+            {remainingCount > 0 && (
+              <div className="text-xs text-muted-foreground pl-2 pt-1">
+                + {remainingCount} more
+              </div>
+            )}
           </div>
         </div>
       );
@@ -514,11 +531,25 @@ function AISearchContent() {
       );
     }
 
+    if (toolName === "generateDraftEmail") {
+      const data = result as {
+        candidateUsername: string;
+        candidateName: string;
+        candidateEmail: string | null;
+        subject: string;
+        body: string;
+        role: string;
+        companyName: string;
+      };
+
+      return <EmailDraft data={data} />;
+    }
+
     return null;
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col bg-background">
+    <div className="relative h-screen flex flex-col bg-background overflow-hidden">
       {/* Background effects */}
       <div className="fixed inset-0 grid-bg" />
       <div className="fixed inset-0 noise-overlay pointer-events-none" />
@@ -535,79 +566,110 @@ function AISearchContent() {
       />
 
       {/* Main Chat Area */}
-      <main className="relative z-10 flex-1 flex flex-col container mx-auto px-4 md:px-6 pt-8 pb-4 max-w-4xl">
+      <main className="relative z-10 flex-1 flex flex-col container mx-auto px-4 md:px-6 pt-8 pb-4 max-w-4xl min-h-0">
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto space-y-4 mb-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        <StickToBottom className="flex-1 relative mb-4 overflow-auto" resize="smooth" initial="smooth">
+          <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
           {messages.length === 0 && (
             <div className="text-center py-16">
-              <GitSignalLogoWave className="h-16 w-16 mx-auto mb-4 text-emerald-400/50" />
-              <p className="text-muted-foreground mb-6">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+              >
+                <GitSignalLogoWave className="h-16 w-16 mx-auto mb-4 text-emerald-400/50" />
+              </motion.div>
+              <motion.p
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.2 }}
+                className="text-muted-foreground mb-6"
+              >
                 Ask me to find developers with specific skills, in certain locations, or working on particular technologies.
-              </p>
+              </motion.p>
               <div className="flex flex-wrap justify-center gap-2">
                 {[
                   "Find Rust developers in Sydney",
                   "Top React engineers on GitHub",
                   "Machine learning experts in Europe",
                   "Go developers with Kubernetes experience",
-                ].map((suggestion) => (
-                  <button
+                ].map((suggestion, index) => (
+                  <motion.button
                     key={suggestion}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.3 + index * 0.1 }}
                     onClick={() => {
                       setInputValue(suggestion);
                     }}
                     className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-sm text-muted-foreground hover:bg-white/10 hover:text-white transition-colors"
                   >
                     {suggestion}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
 
               {/* Recent Searches Section */}
               {!loadingRecent && recentSearches.length > 0 && (
-                <div className="mt-12 text-left max-w-2xl mx-auto">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.7 }}
+                  className="mt-12 text-left max-w-2xl mx-auto"
+                >
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
                     <Clock className="h-4 w-4" />
                     <span>Recently Viewed Profiles</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {recentSearches.map((search) => (
-                      <Link
+                    {recentSearches.map((search, index) => (
+                      <motion.div
                         key={search.id}
-                        href={`/analyze/${search.githubUsername}`}
-                        className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.8 + index * 0.05 }}
                       >
-                        <img
-                          src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
-                          alt={search.githubUsername}
-                          className="w-10 h-10 rounded-full border border-white/20"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-white truncate">
-                              {search.githubName || search.githubUsername}
-                            </span>
-                            <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                          <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
-                          {search.githubLocation && (
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                              <MapPin className="h-3 w-3" />
-                              <span className="truncate">{search.githubLocation}</span>
+                        <Link
+                          href={`/analyze/${search.githubUsername}`}
+                          className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                        >
+                          <img
+                            src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
+                            alt={search.githubUsername}
+                            className="w-10 h-10 rounded-full border border-white/20"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-white truncate">
+                                {search.githubName || search.githubUsername}
+                              </span>
+                              <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                             </div>
-                          )}
-                        </div>
-                      </Link>
+                            <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
+                            {search.githubLocation && (
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                                <MapPin className="h-3 w-3" />
+                                <span className="truncate">{search.githubLocation}</span>
+                              </div>
+                            )}
+                          </div>
+                        </Link>
+                      </motion.div>
                     ))}
                   </div>
-                </div>
+                </motion.div>
               )}
             </div>
           )}
 
+          <AnimatePresence mode="popLayout">
           {(messages as unknown as ChatMessage[]).map((message) => (
-            <div
+            <motion.div
               key={message.id}
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
               className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"
                 }`}
             >
@@ -621,54 +683,70 @@ function AISearchContent() {
                   <p className="text-white">{getMessageText(message)}</p>
                 ) : (
                   <>
-                    {/* Reasoning parts - only show while thinking */}
-                    {getReasoningParts(message)
-                      .filter((part) => part.state === "thinking")
-                      .map((part, i) => (
-                        <div
-                          key={`reasoning-${i}`}
-                          className="flex items-center gap-2 text-xs text-muted-foreground"
-                        >
-                          <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
-                          <span className="truncate">{part.text}</span>
-                        </div>
-                      ))}
-                    {/* Tool invocations */}
-                    {getToolParts(message).map((part, i) => {
-                      const toolName = getToolName(part.type);
-                      const hasResult = part.state === "result" || part.state === "output-available";
-                      // AI SDK v4 may use 'output' or 'result' depending on the state
-                      const toolResult = part.output ?? part.result;
+                    {/* Render parts in original order */}
+                    {message.parts.map((part, i) => {
+                      // Reasoning parts - only show while thinking
+                      if (part.type === "reasoning") {
+                        const reasoningPart = part as ReasoningPart;
+                        if (reasoningPart.state !== "thinking") return null;
+                        return (
+                          <div
+                            key={`reasoning-${i}`}
+                            className="flex items-center gap-2 text-xs text-muted-foreground"
+                          >
+                            <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+                            <span className="truncate">{reasoningPart.text}</span>
+                          </div>
+                        );
+                      }
 
-                      return (
-                        <div key={i} className="space-y-2">
-                          {hasResult ? (
-                            <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates"}>
-                              {toolResult != null && renderToolResult(toolName, toolResult)}
-                            </CollapsibleToolResult>
-                          ) : (
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              <span>
-                                {toolName === "searchGitHubProfiles"
-                                  ? `Searching for "${(part.input as { query?: string })?.query || 'profiles'}"...`
-                                  : toolName === "getTopCandidates"
-                                  ? `Ranking ${(part.input as { usernames?: string[] })?.usernames?.length || 0} candidates...`
-                                  : `Analyzing ${(part.input as { username?: string })?.username || 'profile'}...`}
-                              </span>
+                      // Tool invocations
+                      if (part.type.startsWith("tool-")) {
+                        const toolPart = part as ToolPart;
+                        const toolName = getToolName(toolPart.type);
+                        const hasResult = toolPart.state === "result" || toolPart.state === "output-available";
+                        const toolResult = toolPart.output ?? toolPart.result;
+
+                        return (
+                          <div key={`tool-${i}`} className="space-y-2">
+                            {hasResult ? (
+                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail"}>
+                                {toolResult != null && renderToolResult(toolName, toolResult)}
+                              </CollapsibleToolResult>
+                            ) : (
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>
+                                  {toolName === "searchGitHubProfiles"
+                                    ? `Searching for "${(toolPart.input as { query?: string })?.query || 'profiles'}"...`
+                                    : toolName === "getTopCandidates"
+                                    ? `Ranking ${(toolPart.input as { usernames?: string[] })?.usernames?.length || 0} candidates...`
+                                    : toolName === "generateDraftEmail"
+                                    ? `Drafting email for ${(toolPart.input as { candidateName?: string })?.candidateName || 'candidate'}...`
+                                    : `Analyzing ${(toolPart.input as { username?: string })?.username || 'profile'}...`}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      // Text content
+                      if (part.type === "text") {
+                        const textPart = part as TextPart;
+                        if (!textPart.text) return null;
+                        return (
+                          <div key={`text-${i}`} className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
+                            <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
+                              <ReactMarkdown>{textPart.text}</ReactMarkdown>
                             </div>
-                          )}
-                        </div>
-                      );
+                          </div>
+                        );
+                      }
+
+                      // Skip other part types (step-start, etc.)
+                      return null;
                     })}
-                    {/* Text content */}
-                    {getMessageText(message) && (
-                      <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
-                        <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
-                          <ReactMarkdown>{getMessageText(message)}</ReactMarkdown>
-                        </div>
-                      </div>
-                    )}
                   </>
                 )}
               </div>
@@ -682,27 +760,37 @@ function AISearchContent() {
                   <Bug className="h-3 w-3" />
                 </button>
               )}
-            </div>
+            </motion.div>
           ))}
+          </AnimatePresence>
 
           {isLoading && messages[messages.length - 1]?.role === "user" && (
-            <div className="flex gap-3">
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              className="flex gap-3"
+            >
               <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
                 <Brain className="h-4 w-4 text-white" />
               </div>
               <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
                 <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
               </div>
-            </div>
+            </motion.div>
           )}
 
-          <div ref={messagesEndRef} />
-        </div>
+        </StickToBottom.Content>
+          <ScrollToBottomButton />
+        </StickToBottom>
 
         {/* Input Form */}
-        <form
+        <motion.form
           id="chat-form"
           onSubmit={handleSubmit}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
           className="sticky bottom-4 bg-background/80 backdrop-blur-xl rounded-2xl border border-white/10 p-2"
         >
           <div className="flex gap-2">
@@ -725,7 +813,7 @@ function AISearchContent() {
               )}
             </Button>
           </div>
-        </form>
+        </motion.form>
       </main>
 
       {/* Debug Modal - Dev only */}

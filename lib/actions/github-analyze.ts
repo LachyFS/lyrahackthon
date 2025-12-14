@@ -1,6 +1,9 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { generateObject } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { z } from "zod";
 
 export interface GitHubProfile {
   login: string;
@@ -235,141 +238,95 @@ function calculateActivityLevel(events: GitHubEvent[], lastPush: Date | null): A
   return "inactive";
 }
 
-function estimateExperience(accountAge: number, repos: GitHubRepo[], profile: GitHubProfile): string {
-  const factors = {
-    accountAge,
-    repoCount: repos.length,
-    totalStars: repos.reduce((sum, r) => sum + r.stargazers_count, 0),
-    followers: profile.followers,
-  };
 
-  if (factors.accountAge >= 8 && factors.repoCount >= 50 && factors.totalStars >= 100) {
-    return "Senior (8+ years)";
-  }
-  if (factors.accountAge >= 5 && factors.repoCount >= 30) {
-    return "Mid-level (5-8 years)";
-  }
-  if (factors.accountAge >= 2 && factors.repoCount >= 10) {
-    return "Junior (2-5 years)";
-  }
-  return "Entry-level (0-2 years)";
-}
+// Schema for LLM-based profile analysis
+const llmAnalysisSchema = z.object({
+  estimatedExperience: z.enum([
+    "Entry-level (0-2 years)",
+    "Junior (2-5 years)",
+    "Mid-level (5-8 years)",
+    "Senior (8+ years)"
+  ]).describe("Estimated years of professional experience based on account age, project complexity, and contribution patterns"),
 
-function identifyStrengths(repos: GitHubRepo[], languages: { name: string; percentage: number }[], profile: GitHubProfile): string[] {
-  const strengths: string[] = [];
+  contributionPattern: z.string().describe("A brief description of how this developer typically contributes (e.g., 'Code-focused', 'Collaborative via PRs', 'Community-oriented')"),
 
-  const totalStars = repos.reduce((sum, r) => sum + r.stargazers_count, 0);
-  if (totalStars >= 100) strengths.push("Popular open source projects");
-  if (totalStars >= 10) strengths.push("Community recognition (starred projects)");
+  strengths: z.array(z.string()).max(5).describe("Key strengths identified from their GitHub activity, projects, and profile. Be specific and evidence-based."),
 
-  if (profile.followers >= 100) strengths.push("Strong developer following");
-  if (profile.followers >= 20) strengths.push("Active community presence");
+  concerns: z.array(z.string()).max(4).describe("Potential concerns or areas for follow-up during hiring. Only include if there's actual evidence."),
 
-  if (languages.length >= 5) strengths.push("Versatile (multiple languages)");
-  if (languages.some(l => ["TypeScript", "Rust", "Go"].includes(l.name))) {
-    strengths.push("Modern language adoption");
-  }
+  overallScore: z.number().min(0).max(100).describe("Overall candidate score from 0-100 based on activity, project quality, experience signals, and profile completeness"),
 
-  const originalRepos = repos.filter(r => !r.fork);
-  if (originalRepos.length >= 20) strengths.push("Prolific project creator");
+  recommendation: z.enum(["strong", "good", "moderate", "weak"]).describe("Hiring recommendation based on overall assessment"),
 
-  const documentedRepos = repos.filter(r => r.description && r.description.length > 20);
-  if (documentedRepos.length >= repos.length * 0.5) {
-    strengths.push("Good documentation practices");
-  }
+  summary: z.string().max(300).describe("A 2-3 sentence summary of this candidate suitable for a hiring manager"),
+});
 
-  const topicRepos = repos.filter(r => r.topics && r.topics.length > 0);
-  if (topicRepos.length >= repos.length * 0.3) {
-    strengths.push("Well-organized repositories");
-  }
+type LLMAnalysis = z.infer<typeof llmAnalysisSchema>;
 
-  return strengths.slice(0, 5);
-}
-
-function identifyConcerns(repos: GitHubRepo[], events: GitHubEvent[], profile: GitHubProfile, accountAge: number): string[] {
-  const concerns: string[] = [];
-
-  // Check for inactivity
-  const now = new Date();
-  const lastEvent = events[0] ? new Date(events[0].created_at) : null;
-  if (lastEvent) {
-    const daysSinceActivity = Math.floor((now.getTime() - lastEvent.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysSinceActivity > 180) concerns.push("No activity in 6+ months");
-    else if (daysSinceActivity > 90) concerns.push("Limited recent activity (90+ days)");
-  }
-
-  // Check for mostly forks
-  const forkRatio = repos.filter(r => r.fork).length / repos.length;
-  if (forkRatio > 0.7) concerns.push("Mostly forked repositories (limited original work)");
-
-  // Check for empty/abandoned repos
-  const abandonedRepos = repos.filter(r => {
-    const lastPush = new Date(r.pushed_at);
-    const repoAge = (now.getTime() - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24 * 365);
-    return repoAge > 1 && r.stargazers_count === 0 && !r.description;
-  });
-  if (abandonedRepos.length > repos.length * 0.5) {
-    concerns.push("Many incomplete/abandoned projects");
-  }
-
-  // Check for lack of documentation
-  const undocumented = repos.filter(r => !r.description);
-  if (undocumented.length > repos.length * 0.7) {
-    concerns.push("Poor documentation habits");
-  }
-
-  // Very new account
-  if (accountAge < 1) {
-    concerns.push("New GitHub account (less than 1 year)");
-  }
-
-  return concerns.slice(0, 4);
-}
-
-function calculateOverallScore(
+// Perform LLM-based analysis of a GitHub profile
+async function performLLMAnalysis(
   profile: GitHubProfile,
   repos: GitHubRepo[],
-  activityLevel: AnalysisResult["analysis"]["activityLevel"],
-  strengths: string[],
-  concerns: string[]
-): number {
-  let score = 50; // Base score
+  events: GitHubEvent[],
+  metrics: {
+    accountAge: number;
+    totalStars: number;
+    totalForks: number;
+    languages: { name: string; count: number; percentage: number }[];
+    topTopics: string[];
+    activityLevel: string;
+    lastActivityDays: number;
+  }
+): Promise<LLMAnalysis> {
+  const topRepos = [...repos]
+    .filter(r => !r.fork)
+    .sort((a, b) => b.stargazers_count - a.stargazers_count)
+    .slice(0, 8);
 
-  // Activity bonus
-  const activityBonus = {
-    very_active: 20,
-    active: 15,
-    moderate: 10,
-    low: 5,
-    inactive: 0,
-  };
-  score += activityBonus[activityLevel];
+  const recentEvents = events.slice(0, 30);
+  const eventTypes = recentEvents.reduce((acc, e) => {
+    acc[e.type] = (acc[e.type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
-  // Stars bonus
-  const totalStars = repos.reduce((sum, r) => sum + r.stargazers_count, 0);
-  score += Math.min(15, totalStars / 10);
+  const prompt = `Analyze this GitHub profile for hiring purposes:
 
-  // Followers bonus
-  score += Math.min(10, profile.followers / 20);
+**Profile:**
+- Username: ${profile.login}
+- Name: ${profile.name || "Not provided"}
+- Bio: ${profile.bio || "Not provided"}
+- Location: ${profile.location || "Not provided"}
+- Company: ${profile.company || "Not provided"}
+- Followers: ${profile.followers}
+- Following: ${profile.following}
+- Public repos: ${profile.public_repos}
+- Account created: ${profile.created_at} (${metrics.accountAge.toFixed(1)} years ago)
 
-  // Repo count bonus
-  const originalRepos = repos.filter(r => !r.fork).length;
-  score += Math.min(10, originalRepos / 5);
+**Activity Metrics:**
+- Activity level: ${metrics.activityLevel}
+- Days since last activity: ${metrics.lastActivityDays}
+- Total stars across repos: ${metrics.totalStars}
+- Total forks: ${metrics.totalForks}
+- Recent event breakdown: ${JSON.stringify(eventTypes)}
 
-  // Strengths bonus
-  score += strengths.length * 2;
+**Top Languages (by repo count):**
+${metrics.languages.slice(0, 6).map(l => `- ${l.name}: ${l.percentage}%`).join("\n")}
 
-  // Concerns penalty
-  score -= concerns.length * 5;
+**Top Topics/Tags:**
+${metrics.topTopics.slice(0, 10).join(", ") || "None"}
 
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
+**Top Repositories:**
+${topRepos.map(r => `- ${r.name}: ${r.description || "No description"} (⭐${r.stargazers_count}, ${r.language || "Unknown lang"})`).join("\n")}
 
-function getRecommendation(score: number): AnalysisResult["analysis"]["recommendation"] {
-  if (score >= 75) return "strong";
-  if (score >= 55) return "good";
-  if (score >= 35) return "moderate";
-  return "weak";
+Provide a thorough but fair assessment. Base your analysis on actual evidence from the profile. Don't penalize for things that might just be private (e.g., contributions to private repos won't show).`;
+
+  const { object } = await generateObject({
+    model: "grok-4.1-fast-reasoning",
+    schema: llmAnalysisSchema,
+    prompt,
+  });
+
+  return object;
 }
 
 // GraphQL query for fetching collaboration data efficiently in a single request
@@ -851,28 +808,16 @@ export async function analyzeGitHubProfile(username: string): Promise<AnalysisRe
     .slice(0, 8)
     .map(([topic]) => topic);
 
-  const estimatedExperience = estimateExperience(accountAge, repos, profile);
-
-  const languagesForStrengths = languages.map(l => ({ name: l.name, percentage: l.percentage }));
-  const strengths = identifyStrengths(repos, languagesForStrengths, profile);
-  const concerns = identifyConcerns(repos, events, profile, accountAge);
-
-  const overallScore = calculateOverallScore(profile, repos, activityLevel, strengths, concerns);
-  const recommendation = getRecommendation(overallScore);
-
-  // Determine contribution pattern
-  let contributionPattern = "Balanced";
-  const pushEvents = events.filter(e => e.type === "PushEvent").length;
-  const prEvents = events.filter(e => e.type === "PullRequestEvent").length;
-  const issueEvents = events.filter(e => e.type === "IssuesEvent").length;
-
-  if (pushEvents > prEvents * 2 && pushEvents > issueEvents * 2) {
-    contributionPattern = "Code-focused (mostly direct commits)";
-  } else if (prEvents > pushEvents) {
-    contributionPattern = "Collaborative (mostly pull requests)";
-  } else if (issueEvents > pushEvents && issueEvents > prEvents) {
-    contributionPattern = "Community-oriented (issue discussions)";
-  }
+  // Perform LLM-based analysis
+  const llmAnalysis = await performLLMAnalysis(profile, repos, events, {
+    accountAge,
+    totalStars,
+    totalForks,
+    languages,
+    topTopics,
+    activityLevel,
+    lastActivityDays,
+  });
 
   return {
     profile,
@@ -890,12 +835,12 @@ export async function analyzeGitHubProfile(username: string): Promise<AnalysisRe
       averageRepoAge: Math.round(averageRepoAge * 10) / 10,
       hasReadme: repos.some(r => r.description && r.description.length > 0),
       topTopics,
-      contributionPattern,
-      estimatedExperience,
-      strengths,
-      concerns,
-      overallScore,
-      recommendation,
+      contributionPattern: llmAnalysis.contributionPattern,
+      estimatedExperience: llmAnalysis.estimatedExperience,
+      strengths: llmAnalysis.strengths,
+      concerns: llmAnalysis.concerns,
+      overallScore: llmAnalysis.overallScore,
+      recommendation: llmAnalysis.recommendation,
     },
   };
 }

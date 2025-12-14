@@ -203,8 +203,16 @@ async function analyzeGitHubProfileTool(username: string, token: string | null) 
   }
 }
 
+// GitHub social links interface
+interface GitHubSocials {
+  email: string | null;
+  blog: string | null;
+  twitter_username: string | null;
+  company: string | null;
+}
+
 // Exa search tool for finding GitHub profiles
-async function searchGitHubProfiles(query: string) {
+async function searchGitHubProfiles(query: string, token: string | null) {
   try {
     const result = await exa.searchAndContents(query, {
       numResults: 20,
@@ -213,7 +221,7 @@ async function searchGitHubProfiles(query: string) {
     });
 
     // Filter to only user profiles (not repos, gists, etc.)
-    const profiles = result.results
+    const filteredResults = result.results
       .filter((r) => {
         const url = r.url;
         // Match github.com/username pattern (not github.com/username/repo)
@@ -231,13 +239,115 @@ async function searchGitHubProfiles(query: string) {
       })
       .filter((r) => r.username !== null);
 
+    // Fetch social links for each profile from GitHub API
+    const headers = getGitHubHeaders(token);
+    const profilesWithSocials = await Promise.all(
+      filteredResults.map(async (profile) => {
+        try {
+          const res = await fetch(`https://api.github.com/users/${profile.username}`, {
+            headers,
+            next: { revalidate: 300 },
+          });
+
+          if (res.ok) {
+            const userData = await res.json();
+            const socials: GitHubSocials = {
+              email: userData.email || null,
+              blog: userData.blog || null,
+              twitter_username: userData.twitter_username || null,
+              company: userData.company || null,
+            };
+            return {
+              ...profile,
+              name: userData.name || null,
+              bio: userData.bio || null,
+              location: userData.location || null,
+              socials,
+            };
+          }
+        } catch {
+          // If API call fails, return profile without socials
+        }
+        return {
+          ...profile,
+          name: null,
+          bio: null,
+          location: null,
+          socials: {
+            email: null,
+            blog: null,
+            twitter_username: null,
+            company: null,
+          } as GitHubSocials,
+        };
+      })
+    );
+
     return {
       query,
-      profiles,
-      total: profiles.length,
+      profiles: profilesWithSocials,
+      total: profilesWithSocials.length,
     };
   } catch (error) {
     return { error: `Search failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+// Exa web search and scrape tool - can search and scrape any URL
+async function webSearchAndScrape(query: string, options?: {
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  numResults?: number;
+  type?: "keyword" | "neural" | "auto";
+}) {
+  try {
+    const result = await exa.searchAndContents(query, {
+      numResults: options?.numResults || 10,
+      includeDomains: options?.includeDomains,
+      excludeDomains: options?.excludeDomains,
+      type: options?.type || "auto",
+      text: { maxCharacters: 2000 },
+    });
+
+    const results = result.results.map((r) => ({
+      url: r.url,
+      title: r.title,
+      content: r.text,
+      publishedDate: r.publishedDate,
+      author: r.author,
+    }));
+
+    return {
+      query,
+      results,
+      total: results.length,
+    };
+  } catch (error) {
+    return { error: `Web search failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+// Exa URL scraper - scrape content from specific URLs
+async function scrapeUrls(urls: string[]) {
+  try {
+    const result = await exa.getContents(urls, {
+      text: { maxCharacters: 5000 },
+    });
+
+    const contents = result.results.map((r) => ({
+      url: r.url,
+      title: r.title,
+      content: r.text,
+      publishedDate: r.publishedDate,
+      author: r.author,
+    }));
+
+    return {
+      contents,
+      total: contents.length,
+    };
+  } catch (error) {
+    return { error: `Scraping failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -564,12 +674,22 @@ export async function POST(req: Request) {
     model: 'xai/grok-4.1-fast-reasoning',
     system: `You are GitSignal AI, a helpful assistant for hiring managers looking to find and evaluate developers.
 
-You have access to three tools:
+You have access to these tools:
+
+**GitHub-specific tools:**
 1. **searchGitHubProfiles**: Search for GitHub profiles based on natural language queries like "rust developers in Sydney" or "machine learning engineers". Uses Exa AI to find relevant GitHub profiles.
 
 2. **analyzeGitHubProfile**: Get detailed analysis of a specific GitHub user by username.
 
 3. **getTopCandidates**: Rank and score multiple GitHub profiles against a hiring brief. This displays a rich UI card for each candidate showing their score, match reasons, concerns, languages, and top repos.
+
+**General web tools:**
+4. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+
+5. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
+
+**Outreach tools:**
+6. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool returns an editable email draft that the user can customize before sending.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
@@ -587,6 +707,10 @@ For single profile analysis:
 - Use analyzeGitHubProfile - the tool renders a detailed profile card
 - Do NOT summarize the profile in text after the tool call
 
+For additional research on candidates:
+- Use webSearch to find their LinkedIn, personal sites, blog posts, talks, etc.
+- Use scrapeUrls to get content from specific URLs mentioned in their GitHub profile or found via webSearch
+
 Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`,
     messages: modelMessages,
     stopWhen: stepCountIs(10),
@@ -597,7 +721,8 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
           query: z.string().describe("The search query to find GitHub profiles, e.g. 'rust developers in Sydney' or 'React frontend engineers'"),
         }),
         execute: async ({ query }) => {
-          return searchGitHubProfiles(query);
+          const token = await getGitHubToken();
+          return searchGitHubProfiles(query, token);
         },
       }),
       analyzeGitHubProfile: tool({
@@ -624,6 +749,83 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
         }),
         execute: async ({ usernames, brief, searchQuery }) => {
           return getTopCandidates(usernames, brief, searchQuery);
+        },
+      }),
+      webSearch: tool({
+        description: "Search the web for any content and get scraped results. Use this to find information from any website - articles, documentation, blog posts, portfolio sites, LinkedIn profiles, personal websites, etc. Can filter to specific domains or exclude domains.",
+        inputSchema: z.object({
+          query: z.string().describe("The search query, e.g. 'best practices for React performance' or 'John Smith software engineer portfolio'"),
+          includeDomains: z.array(z.string()).optional().describe("Only include results from these domains, e.g. ['linkedin.com', 'medium.com']"),
+          excludeDomains: z.array(z.string()).optional().describe("Exclude results from these domains, e.g. ['pinterest.com']"),
+          numResults: z.number().optional().describe("Number of results to return (default 10, max 20)"),
+          type: z.enum(["keyword", "neural", "auto"]).optional().describe("Search type: 'keyword' for exact matches, 'neural' for semantic search, 'auto' to let Exa decide (default)"),
+        }),
+        execute: async ({ query, includeDomains, excludeDomains, numResults, type }) => {
+          return webSearchAndScrape(query, { includeDomains, excludeDomains, numResults, type });
+        },
+      }),
+      scrapeUrls: tool({
+        description: "Scrape and extract content from specific URLs. Use this when you have specific URLs you want to get content from, such as a candidate's personal website, portfolio, blog post, or any other web page.",
+        inputSchema: z.object({
+          urls: z.array(z.string()).describe("Array of URLs to scrape, e.g. ['https://johndoe.com', 'https://medium.com/@johndoe/my-article']"),
+        }),
+        execute: async ({ urls }) => {
+          return scrapeUrls(urls);
+        },
+      }),
+      generateDraftEmail: tool({
+        description: "Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to, contact, or email a candidate. Returns an editable email that the user can customize before sending via mailto.",
+        inputSchema: z.object({
+          candidateUsername: z.string().describe("The GitHub username of the candidate"),
+          candidateName: z.string().optional().describe("The candidate's display name if known"),
+          candidateEmail: z.string().optional().describe("The candidate's email if known from their GitHub profile"),
+          role: z.string().describe("The role or position being offered, e.g. 'Senior React Developer'"),
+          companyName: z.string().describe("The name of the hiring company"),
+          keySkills: z.array(z.string()).optional().describe("Key skills that matched the candidate, e.g. ['React', 'TypeScript', 'Node.js']"),
+          personalizedNote: z.string().optional().describe("A personalized note about why this candidate stood out, e.g. mentioning a specific project they worked on"),
+          senderName: z.string().optional().describe("The name of the person sending the email"),
+          senderTitle: z.string().optional().describe("The title of the person sending the email, e.g. 'Engineering Manager'"),
+        }),
+        execute: async ({ candidateUsername, candidateName, candidateEmail, role, companyName, keySkills, personalizedNote, senderName, senderTitle }) => {
+          const name = candidateName || candidateUsername;
+          const firstName = name.split(" ")[0];
+
+          const skillsText = keySkills && keySkills.length > 0
+            ? `Your expertise in ${keySkills.slice(0, 3).join(", ")} caught our attention.`
+            : "";
+
+          const personalizedText = personalizedNote
+            ? `${personalizedNote} `
+            : "";
+
+          const senderSignature = senderName
+            ? `${senderName}${senderTitle ? `\n${senderTitle}` : ""}\n${companyName}`
+            : `The ${companyName} Team`;
+
+          const subject = `Exciting ${role} Opportunity at ${companyName}`;
+
+          const body = `Hi ${firstName},
+
+I came across your GitHub profile and was impressed by your work. ${personalizedText}${skillsText}
+
+We're currently looking for a ${role} to join our team at ${companyName}, and I think you could be a great fit.
+
+I'd love to learn more about your experience and share what we're building. Would you be open to a quick chat?
+
+Looking forward to hearing from you!
+
+Best regards,
+${senderSignature}`;
+
+          return {
+            candidateUsername,
+            candidateName: name,
+            candidateEmail: candidateEmail || null,
+            subject,
+            body,
+            role,
+            companyName,
+          };
         },
       }),
     },
