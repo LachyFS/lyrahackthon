@@ -1,7 +1,7 @@
 "use server";
 
 import { Sandbox } from "@vercel/sandbox";
-import { streamText, tool, stepCountIs, ToolLoopAgent, streamObject, Output } from "ai";
+import { streamText, tool, stepCountIs, generateObject } from "ai";
 import { z } from "zod";
 import { Writable } from "stream";
 import { Octokit } from "octokit";
@@ -61,11 +61,62 @@ const repoAnalysisSchema = z.object({
 
   // Professionalism signals
   professionalism: z.object({
-    score: z.number().min(1).max(10).describe("Professionalism score from 1-10"),
+    score: z.number().min(1).describe("Professionalism score from 1-10"),
     commitMessageQuality: z.enum(["excellent", "good", "average", "poor"]).describe("Quality of commit messages"),
     codeOrganization: z.enum(["excellent", "good", "average", "poor"]).describe("How well the code is organized"),
     namingConventions: z.enum(["consistent", "mostly_consistent", "inconsistent"]).describe("Consistency of naming"),
     errorHandling: z.enum(["comprehensive", "adequate", "minimal", "poor"]).describe("How errors are handled"),
+  }),
+
+  // Deep code analysis findings
+  codeAnalysis: z.object({
+    // Specific code patterns observed
+    patternsObserved: z.array(z.object({
+      pattern: z.string().describe("Name of the pattern (e.g., 'Repository Pattern', 'Dependency Injection', 'Error Boundaries')"),
+      quality: z.enum(["excellent", "good", "average", "poor"]).describe("How well it's implemented"),
+      example: z.string().describe("Brief code example or file reference where this was observed"),
+    })).describe("Design patterns and architectural patterns found in the code"),
+
+    // Security analysis
+    securityPractices: z.object({
+      inputValidation: z.enum(["thorough", "partial", "minimal", "none"]).describe("How well user inputs are validated"),
+      authHandling: z.string().nullable().describe("How authentication/authorization is handled if present"),
+      sensitiveDataHandling: z.enum(["secure", "mostly_secure", "risky", "not_applicable"]).describe("How sensitive data like API keys, tokens are handled"),
+      securityIssuesFound: z.array(z.string()).describe("Any potential security issues identified"),
+    }),
+
+    // Code quality metrics from actual code review
+    codeMetrics: z.object({
+      averageFunctionLength: z.enum(["short_focused", "reasonable", "long", "very_long"]).describe("Typical function length"),
+      cyclomaticComplexity: z.enum(["low", "moderate", "high", "very_high"]).describe("Estimated code complexity"),
+      codeComments: z.enum(["well_documented", "adequately_documented", "sparse", "none"]).describe("Quantity and quality of comments"),
+      typeUsage: z.enum(["strict_typing", "good_typing", "partial_typing", "no_typing", "not_applicable"]).describe("How well types are used (for typed languages)"),
+      deadCode: z.boolean().describe("Whether dead/unused code was found"),
+    }),
+
+    // Specific code examples (positive and negative)
+    codeExamples: z.array(z.object({
+      type: z.enum(["strength", "concern", "notable"]).describe("Whether this is a positive or negative example"),
+      file: z.string().describe("File where this was found"),
+      description: z.string().describe("What makes this code good/bad/notable"),
+      snippet: z.string().describe("Brief code snippet or description"),
+    })).describe("Specific code examples that stood out during review"),
+
+    // API/Architecture analysis
+    apiDesign: z.object({
+      restfulness: z.enum(["restful", "mostly_restful", "non_restful", "not_applicable"]).describe("REST API adherence if applicable"),
+      consistentResponses: z.boolean().describe("Whether API responses follow a consistent format"),
+      errorResponses: z.enum(["comprehensive", "adequate", "minimal", "poor", "not_applicable"]).describe("How errors are returned to clients"),
+      dataValidation: z.enum(["schema_validated", "basic_validation", "minimal", "none", "not_applicable"]).describe("How request data is validated"),
+    }).nullable().describe("API design quality if the project exposes APIs"),
+
+    // Dependency analysis
+    dependencyHealth: z.object({
+      outdatedDeps: z.boolean().describe("Whether there appear to be outdated dependencies"),
+      unusedDeps: z.boolean().describe("Whether there appear to be unused dependencies"),
+      securityRisks: z.boolean().describe("Whether any dependencies have known security issues"),
+      dependencyCount: z.enum(["minimal", "appropriate", "heavy", "excessive"]).describe("How many dependencies relative to project size"),
+    }),
   }),
 
   // Git/collaboration signals
@@ -85,11 +136,11 @@ const repoAnalysisSchema = z.object({
   }),
 
   // Strengths and areas of growth
-  strengths: z.array(z.string()).max(6).describe("Key strengths demonstrated in this repo"),
-  areasForGrowth: z.array(z.string()).max(4).describe("Areas where the developer could improve (be constructive, not harsh)"),
+  strengths: z.array(z.string()).describe("Key strengths demonstrated in this repo"),
+  areasForGrowth: z.array(z.string()).describe("Areas where the developer could improve (be constructive, not harsh)"),
 
   // Overall summary
-  summary: z.string().max(500).describe("A thoughtful 3-4 sentence summary of the developer's capabilities based on this repo"),
+  summary: z.string().describe("A thoughtful 3-4 sentence summary of the developer's capabilities based on this repo"),
 
   // Recommendation for hiring
   hiringRecommendation: z.enum([
@@ -497,17 +548,63 @@ IMPORTANT GUIDELINES:
 - Consider the PROJECT TYPE when assessing complexity (a simple tool done well is fine)
 - Give credit for good practices even if the code itself is simple
 
-SUGGESTED ANALYSIS APPROACH:
-1. First, explore the repository structure (ls, find, tree)
-2. Check the README and documentation
-3. Analyze git history (commits, branches, frequency)
-4. Look at code organization and file structure
-5. Read some actual code files to assess quality
-6. Check for tests, CI/CD configuration
-7. Analyze dependencies and build configuration
-8. Look at recent commits for commit message quality
+CRITICAL: YOU MUST READ AND ANALYZE ACTUAL CODE FILES
+Do NOT just look at file names and structure - you MUST read the actual source code to evaluate:
+- Code patterns and architecture decisions
+- Error handling approaches
+- Type safety and validation
+- Algorithm implementations
+- API design and data flow
+- Security considerations
+- Performance patterns
 
-Be efficient with commands - you have a limited time in the sandbox. Focus on gathering the most informative data.
+REQUIRED ANALYSIS APPROACH (follow ALL steps):
+
+PHASE 1 - REPOSITORY OVERVIEW:
+1. List the repository structure: ls -la && find . -type f -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.py" -o -name "*.go" -o -name "*.rs" | head -50
+2. Check README: cat README.md 2>/dev/null || cat readme.md 2>/dev/null
+3. Identify main entry points: cat package.json 2>/dev/null | head -50
+
+PHASE 2 - DEEP CODE ANALYSIS (MOST IMPORTANT):
+4. READ at least 3-5 main source files in their entirety using cat. Pick the most important/complex files.
+5. For each file read, analyze:
+   - Function complexity and decomposition
+   - Variable naming and clarity
+   - Error handling patterns (try/catch, error types, validation)
+   - Type usage (if TypeScript/typed language)
+   - Comments and documentation quality
+   - Import organization
+   - Code duplication
+   - Security patterns (input validation, sanitization)
+
+6. Search for specific patterns:
+   - Error handling: grep -r "catch\|throw\|Error\|try" --include="*.ts" --include="*.tsx" --include="*.js" | head -30
+   - Type definitions: grep -r "interface\|type\|enum" --include="*.ts" --include="*.tsx" | head -30
+   - Testing: find . -name "*.test.*" -o -name "*.spec.*" | head -20
+   - API endpoints: grep -r "app.get\|app.post\|router\.\|fetch\|axios" --include="*.ts" --include="*.tsx" --include="*.js" | head -30
+   - Environment/config handling: grep -r "process.env\|dotenv\|config" --include="*.ts" --include="*.tsx" --include="*.js" | head -20
+   - Security patterns: grep -r "sanitize\|escape\|validate\|auth\|jwt\|token" --include="*.ts" --include="*.tsx" --include="*.js" | head -20
+
+PHASE 3 - CODE QUALITY METRICS:
+7. Count lines of code: find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | xargs wc -l 2>/dev/null | tail -1
+8. Check for linting config: cat .eslintrc* eslint.config.* .prettierrc* 2>/dev/null | head -30
+9. Check TypeScript config: cat tsconfig.json 2>/dev/null
+10. Dependencies analysis: cat package.json 2>/dev/null | grep -A 100 '"dependencies"' | head -50
+
+PHASE 4 - GIT PRACTICES:
+11. Recent commits: git log --oneline -20
+12. Commit message quality: git log --format="%s%n%b" -10
+13. Branch history: git branch -a 2>/dev/null
+14. Contributor analysis: git shortlog -sn 2>/dev/null | head -10
+
+PHASE 5 - TESTING & CI:
+15. Test files: find . -path ./node_modules -prune -o -name "*.test.*" -print -o -name "*.spec.*" -print | head -20
+16. Read a test file if exists: find . -path ./node_modules -prune -o \( -name "*.test.*" -o -name "*.spec.*" \) -print | head -1 | xargs cat 2>/dev/null | head -100
+17. CI configuration: cat .github/workflows/*.yml 2>/dev/null | head -50 || cat .gitlab-ci.yml 2>/dev/null | head -50
+
+REMEMBER: The value of this analysis comes from READING AND UNDERSTANDING ACTUAL CODE.
+Surface-level analysis (just looking at file names) is NOT acceptable.
+You MUST use 'cat' to read multiple source files and provide specific observations about the code quality.
 
 After gathering information, provide your complete structured analysis as a JSON object matching the required schema.`;
 
@@ -520,16 +617,15 @@ After gathering information, provide your complete structured analysis as a JSON
     };
 
     const result = streamText({
-      model: "xai/grok-4.1-fast-reasoning",
+      model: "xai/grok-4.1-fast-reasoning" as Parameters<typeof streamText>[0]["model"],
       system: systemPrompt,
-      output: Output.object({ schema: repoAnalysisSchema }),
       prompt: `Analyze this repository thoroughly. Use the bash tool to explore the codebase and gather information.
 
-      Start by exploring the repository structure, then dig deeper into areas that reveal developer skill and professionalism.
-      Collect evidence for your assessment - specific examples are more valuable than general impressions.
+Start by exploring the repository structure, then dig deeper into areas that reveal developer skill and professionalism.
+Collect evidence for your assessment - specific examples are more valuable than general impressions.
 
-      After gathering enough information, provide your complete structured analysis.`,  
-      stopWhen: stepCountIs(25),
+After gathering enough information, provide a detailed summary of your findings. Do NOT output JSON - just provide your analysis in natural language. The structured output will be generated separately.`,
+      stopWhen: stepCountIs(40),
       tools: { bash: bashTool },
     });
 
@@ -602,23 +698,7 @@ After gathering information, provide your complete structured analysis as a JSON
       }
     }
 
-    // Try to parse the final text as our structured output
-    let output: RepoAnalysis | undefined;
-    try {
-      // Find JSON in the response (might be wrapped in markdown code blocks)
-      const jsonMatch = finalText.match(/```json\s*([\s\S]*?)\s*```/) ||
-                        finalText.match(/```\s*([\s\S]*?)\s*```/) ||
-                        [null, finalText];
-      const jsonStr = jsonMatch[1] || finalText;
-
-      // Try to parse as JSON
-      const parsed = JSON.parse(jsonStr.trim());
-      output = repoAnalysisSchema.parse(parsed);
-    } catch {
-      console.error("Failed to parse structured output from text");
-    }
-
-    // Yield: Generating report
+    // Yield: Generating report (secondary LLM call)
     yield {
       status: 'generating_report',
       message: 'Generating final analysis report...',
@@ -628,9 +708,50 @@ After gathering information, provide your complete structured analysis as a JSON
       totalSteps: stepNumber,
     };
 
-    // Handle missing output
-    if (!output) {
-      console.error("Agent returned no output");
+    // Build the full context for the secondary LLM call
+    const commandHistorySummary = commandHistory.map((c, i) =>
+      `### Command ${i + 1}: ${c.purpose}\n\`\`\`bash\n${c.command}\n\`\`\`\n**Output:**\n\`\`\`\n${c.output.slice(0, 3000)}${c.output.length > 3000 ? '\n... (truncated)' : ''}\n\`\`\``
+    ).join('\n\n');
+
+    const structuredOutputPrompt = `You are analyzing a GitHub repository "${repoOwner}/${repoName}" based on the exploration data below.
+
+${hiringBrief ? `HIRING CONTEXT:\n${hiringBrief}\n\n` : ''}
+
+## EXPLORATION SUMMARY
+
+The following commands were executed to analyze the repository:
+
+${commandHistorySummary}
+
+## AI AGENT ANALYSIS
+
+${finalText}
+
+---
+
+Based on ALL the information above (command outputs AND the AI agent's analysis), generate a comprehensive structured assessment of this repository and the developer's skills.
+
+Be thorough but fair. Look for positive signals, not just problems. Consider the project type when assessing complexity.`;
+
+    // Secondary LLM call to generate structured output
+    let output: RepoAnalysis;
+    try {
+      const structuredResult = await generateObject({
+        model: 'google/gemini-3-pro-preview',
+        providerOptions: {
+          openai: {
+            reasoningEffort: "none",
+          }
+        },
+        schema: repoAnalysisSchema,
+        prompt: structuredOutputPrompt,
+      });
+
+      output = structuredResult.object;
+    } catch (error) {
+      console.error("Failed to generate structured output:", error);
+
+      // Fallback result if structured generation fails
       const fallbackResult: RepoAnalysis = {
         repoName,
         repoOwner,
@@ -644,9 +765,9 @@ After gathering information, provide your complete structured analysis as a JSON
         codeQuality: "average",
         skillLevel: "intermediate",
         skillIndicators: [{
-          indicator: "Analysis completed but output parsing failed",
+          indicator: "Analysis completed but structured output generation failed",
           significance: "neutral",
-          explanation: "The agent completed but didn't return structured output"
+          explanation: "The exploration completed but the final report generation encountered an error"
         }],
         professionalism: {
           score: 5,
@@ -654,6 +775,30 @@ After gathering information, provide your complete structured analysis as a JSON
           codeOrganization: "average",
           namingConventions: "mostly_consistent",
           errorHandling: "adequate"
+        },
+        codeAnalysis: {
+          patternsObserved: [],
+          securityPractices: {
+            inputValidation: "none",
+            authHandling: null,
+            sensitiveDataHandling: "not_applicable",
+            securityIssuesFound: []
+          },
+          codeMetrics: {
+            averageFunctionLength: "reasonable",
+            cyclomaticComplexity: "moderate",
+            codeComments: "sparse",
+            typeUsage: "not_applicable",
+            deadCode: false
+          },
+          codeExamples: [],
+          apiDesign: null,
+          dependencyHealth: {
+            outdatedDeps: false,
+            unusedDeps: false,
+            securityRisks: false,
+            dependencyCount: "appropriate"
+          }
         },
         gitPractices: {
           commitFrequency: "unknown",
@@ -669,7 +814,7 @@ After gathering information, provide your complete structured analysis as a JSON
         },
         strengths: ["Repository was analyzed"],
         areasForGrowth: [],
-        summary: "Analysis completed but structured output was not generated.",
+        summary: finalText.slice(0, 500) || "Analysis completed but structured output generation failed.",
         hiringRecommendation: "maybe",
         rawFindings: commandHistory.map(c => ({
           command: c.command,
@@ -691,7 +836,7 @@ After gathering information, provide your complete structured analysis as a JSON
       return fallbackProgress;
     }
 
-    // Return complete
+    // Return complete with structured output
     const finalProgress: AnalysisProgress = {
       status: 'complete',
       message: 'Analysis complete!',

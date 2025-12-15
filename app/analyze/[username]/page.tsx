@@ -372,7 +372,6 @@ async function AnalysisContent({ username }: { username: string }) {
             {analysis.strengths.length > 0 && (
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-6">
                 <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-emerald-400" />
                   Strengths
                 </h2>
                 <ul className="space-y-2">

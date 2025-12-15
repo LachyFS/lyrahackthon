@@ -6,6 +6,7 @@ import { MapPin, Link as LinkIcon, Building, Briefcase, Users } from "lucide-rea
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { LanguageBadge } from "@/components/language-icon";
 import { Button } from "@/components/ui/button";
 import { toggleFollow } from "@/lib/actions/social";
 import { toast } from "sonner";
@@ -147,9 +148,7 @@ export function ProfileCard({
                 <h4 className="text-sm font-medium">Top Languages</h4>
                 <div className="flex flex-wrap gap-2">
                   {topLanguages.map((lang) => (
-                    <Badge key={lang.name} variant="outline">
-                      {lang.name} ({lang.percentage}%)
-                    </Badge>
+                    <LanguageBadge key={lang.name} language={lang.name} percentage={lang.percentage} />
                   ))}
                 </div>
               </div>

@@ -35,7 +35,8 @@ interface CandidateData {
   score?: number;
   matchReasons?: string[];
   concerns?: string[];
-  experience: string;
+  accountAgeYears: number;
+  repoCount: number;
   activityLevel: string;
   topLanguages: string[];
   topics?: string[];
@@ -216,7 +217,9 @@ export function ExpandableProfileCard({ candidate }: ExpandableProfileCardProps)
 
           {/* Stats & Languages inline */}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="text-xs text-muted-foreground">{candidate.experience.split(" ")[0]}</span>
+            <span className="text-xs text-muted-foreground">{candidate.accountAgeYears}y on GitHub</span>
+            <span className="text-xs text-muted-foreground">•</span>
+            <span className="text-xs text-muted-foreground">{candidate.repoCount} repos</span>
             <span className="text-xs text-muted-foreground">•</span>
             <span className="text-xs text-muted-foreground flex items-center gap-0.5">
               <Star className="h-3 w-3" />
