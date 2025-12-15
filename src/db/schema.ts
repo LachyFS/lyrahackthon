@@ -50,11 +50,11 @@ export const profiles = devshowcase.table(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     lastGithubSync: timestamp("last_github_sync"),
   },
-  (table) => [
+  (table: any) => [
     index("profiles_github_username_idx").on(table.githubUsername),
     index("profiles_languages_idx").on(table.languages),
   ]
-);
+).enableRLS();
 
 // ============================================
 // POSTS - Projects/work shared by engineers
@@ -92,12 +92,12 @@ export const posts = devshowcase.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("posts_author_id_idx").on(table.authorId),
     index("posts_created_at_idx").on(table.createdAt),
     index("posts_tags_idx").on(table.tags),
   ]
-);
+).enableRLS();
 
 // ============================================
 // FOLLOWS - User following relationships
@@ -113,12 +113,12 @@ export const follows = devshowcase.table(
       .references(() => profiles.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     primaryKey({ columns: [table.followerId, table.followingId] }),
     index("follows_follower_id_idx").on(table.followerId),
     index("follows_following_id_idx").on(table.followingId),
   ]
-);
+).enableRLS();
 
 // ============================================
 // LIKES - Post likes
@@ -134,11 +134,11 @@ export const likes = devshowcase.table(
       .references(() => posts.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     primaryKey({ columns: [table.userId, table.postId] }),
     index("likes_post_id_idx").on(table.postId),
   ]
-);
+).enableRLS();
 
 // ============================================
 // WISHLISTS - What developers are looking for
@@ -175,12 +175,12 @@ export const wishlists = devshowcase.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("wishlists_profile_id_idx").on(table.profileId),
     index("wishlists_type_idx").on(table.type),
     index("wishlists_is_active_idx").on(table.isActive),
   ]
-);
+).enableRLS();
 
 // ============================================
 // SEARCH HISTORY - Discovered/searched GitHub accounts
@@ -203,12 +203,12 @@ export const searchHistory = devshowcase.table(
     // Timestamps
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("search_history_auth_user_id_idx").on(table.authUserId),
     index("search_history_github_username_idx").on(table.githubUsername),
     index("search_history_created_at_idx").on(table.createdAt),
   ]
-);
+).enableRLS();
 
 // ============================================
 // COMMENTS - Post comments
@@ -229,11 +229,11 @@ export const comments = devshowcase.table(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("comments_post_id_idx").on(table.postId),
     index("comments_author_id_idx").on(table.authorId),
   ]
-);
+).enableRLS();
 
 // ============================================
 // RELATIONS
