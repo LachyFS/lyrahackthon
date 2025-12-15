@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/src/db";
 import { searchHistory } from "@/src/db/schema";
 import { analyzeRepositoryWithProgress, quickRepoCheck, type AnalysisProgress } from "@/lib/actions/repo-analyze";
+import { checkRateLimit } from "@/lib/redis";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
@@ -752,6 +753,41 @@ async function getTopCandidates(
 }
 
 export async function POST(req: Request) {
+  // Require authentication for AI generation
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return new Response(
+      JSON.stringify({ error: "Authentication required. Please sign in to use AI features." }),
+      { status: 401, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Rate limiting: 20 requests per minute per user
+  const rateLimit = await checkRateLimit(`ai:chat:${user.id}`, 20, 60);
+  if (!rateLimit.success) {
+    const resetDate = new Date(rateLimit.reset);
+    return new Response(
+      JSON.stringify({
+        error: "Rate limit exceeded. Please try again later.",
+        retryAfter: Math.ceil((rateLimit.reset - Date.now()) / 1000),
+        limit: rateLimit.limit,
+        reset: resetDate.toISOString(),
+      }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "X-RateLimit-Limit": rateLimit.limit.toString(),
+          "X-RateLimit-Remaining": rateLimit.remaining.toString(),
+          "X-RateLimit-Reset": resetDate.toISOString(),
+          "Retry-After": Math.ceil((rateLimit.reset - Date.now()) / 1000).toString(),
+        }
+      }
+    );
+  }
+
   const { messages, roastMode } = await req.json();
 
   // Convert UI messages to model messages

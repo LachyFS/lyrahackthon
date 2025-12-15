@@ -15,11 +15,11 @@ import {
   TrendingUp,
   Code2,
   GitCommit,
-  Flame,
 } from "lucide-react";
 import { SearchForm } from "@/components/search-form";
 import { GitRadarLogoWave } from "@/components/gitradar-logo";
 import { SiteHeader } from "@/components/site-header";
+import { QuickExamples } from "@/components/quick-examples";
 
 export default async function Home() {
   const user = await getUser();
@@ -75,33 +75,7 @@ export default async function Home() {
             </div>
 
             {/* Quick actions */}
-            <div className="animate-slide-up opacity-0 delay-400 flex flex-wrap justify-center gap-2 text-sm">
-              <Link
-                href="/analyze/torvalds"
-                className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-colors"
-              >
-                @torvalds
-              </Link>
-              <Link
-                href="/analyze/gaearon"
-                className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-colors"
-              >
-                @gaearon
-              </Link>
-              <Link
-                href="/ai-search?q=Rust%20developers%20in%20Sydney"
-                className="px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20 transition-colors"
-              >
-                Rust devs in Sydney
-              </Link>
-              <Link
-                href="/ai-search?roast=true"
-                className="px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors inline-flex items-center gap-1.5"
-              >
-                <Flame className="h-3.5 w-3.5" />
-                Roast Mode
-              </Link>
-            </div>
+            <QuickExamples isSignedIn={!!user} />
 
             {/* Preview Card */}
             <div className="animate-scale-in opacity-0 delay-500 mt-16 md:mt-20 w-full max-w-4xl">

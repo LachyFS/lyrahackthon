@@ -1,5 +1,7 @@
 import { streamText } from "ai";
 import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
+import { checkRateLimit } from "@/lib/redis";
 
 const requestSchema = z.object({
   analysis: z.object({
@@ -40,6 +42,41 @@ const requestSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  // Require authentication for AI generation
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return new Response(
+      JSON.stringify({ error: "Authentication required. Please sign in to use AI features." }),
+      { status: 401, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Rate limiting: 30 requests per minute per user
+  const rateLimit = await checkRateLimit(`ai:summary:${user.id}`, 30, 60);
+  if (!rateLimit.success) {
+    const resetDate = new Date(rateLimit.reset);
+    return new Response(
+      JSON.stringify({
+        error: "Rate limit exceeded. Please try again later.",
+        retryAfter: Math.ceil((rateLimit.reset - Date.now()) / 1000),
+        limit: rateLimit.limit,
+        reset: resetDate.toISOString(),
+      }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "X-RateLimit-Limit": rateLimit.limit.toString(),
+          "X-RateLimit-Remaining": rateLimit.remaining.toString(),
+          "X-RateLimit-Reset": resetDate.toISOString(),
+          "Retry-After": Math.ceil((rateLimit.reset - Date.now()) / 1000).toString(),
+        }
+      }
+    );
+  }
+
   const body = await req.json();
 
   const parsed = requestSchema.safeParse(body);
