@@ -2,8 +2,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { BarChart3, UserX, ArrowLeft } from "lucide-react";
 import { SearchForm } from "@/components/search-form";
+import { getUser } from "@/lib/actions/auth";
 
-export default function NotFound() {
+export default async function NotFound() {
+  const user = await getUser();
   return (
     <div className="min-h-screen bg-background">
       <div className="fixed inset-0 grid-bg" />
@@ -32,7 +34,7 @@ export default function NotFound() {
             </p>
           </div>
           <div className="w-full max-w-md">
-            <SearchForm />
+            <SearchForm isSignedIn={!!user} />
           </div>
           <Button variant="ghost" asChild>
             <Link href="/">
