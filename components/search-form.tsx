@@ -4,6 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Search, Loader2, GithubIcon, Lock } from "lucide-react";
 import { signInWithGitHub } from "@/lib/actions/auth";
 
@@ -104,46 +111,34 @@ export function SearchForm({ isSignedIn = false }: SearchFormProps) {
         </div>
       </form>
 
-      {/* Sign-in prompt overlay */}
-      {showSignInPrompt && (
-        <div className="absolute inset-x-0 top-full mt-2 z-50">
-          <div className="rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-4 shadow-xl">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <Lock className="h-4 w-4 text-emerald-400" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-white mb-1">
-                  Sign in to search
-                </p>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Sign in with GitHub to search developers and access AI-powered analysis.
-                </p>
-                <form action={signInWithGitHub}>
-                  <Button
-                    type="submit"
-                    size="sm"
-                    className="bg-white text-black hover:bg-white/90 font-medium"
-                  >
-                    <GithubIcon className="mr-2 h-4 w-4" />
-                    Sign in with GitHub
-                  </Button>
-                </form>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowSignInPrompt(false)}
-                className="text-muted-foreground hover:text-white transition-colors"
-              >
-                <span className="sr-only">Close</span>
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+      {/* Sign-in modal */}
+      <Dialog open={showSignInPrompt} onOpenChange={setShowSignInPrompt}>
+        <DialogContent className="sm:max-w-md bg-zinc-900 border-white/10">
+          <DialogHeader className="text-center sm:text-center">
+            <div className="mx-auto mb-4 w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <Lock className="h-6 w-6 text-emerald-400" />
             </div>
+            <DialogTitle className="text-xl">Sign in to search</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Sign in with GitHub to search developers and access AI-powered analysis of any developer&apos;s profile.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 mt-4">
+            <form action={signInWithGitHub}>
+              <Button
+                type="submit"
+                className="w-full bg-white text-black hover:bg-white/90 font-medium h-11"
+              >
+                <GithubIcon className="mr-2 h-5 w-5" />
+                Sign in with GitHub
+              </Button>
+            </form>
+            <p className="text-xs text-center text-muted-foreground">
+              We only request read access to your public profile.
+            </p>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
