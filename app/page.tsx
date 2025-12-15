@@ -71,7 +71,7 @@ export default async function Home() {
 
             {/* Search Form */}
             <div className="animate-slide-up opacity-0 delay-300 w-full max-w-2xl mb-8">
-              <SearchForm />
+              <SearchForm isSignedIn={!!user} />
             </div>
 
             {/* Quick actions */}

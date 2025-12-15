@@ -28,6 +28,7 @@ import {
 import { SearchForm } from "@/components/search-form";
 import { AISummary } from "@/components/ai-summary";
 import { CollaborationGraph } from "@/components/collaboration-graph";
+import { getUser } from "@/lib/actions/auth";
 
 interface PageProps {
   params: Promise<{ username: string }>;
@@ -104,7 +105,7 @@ function getRecommendationBadge(recommendation: AnalysisResult["analysis"]["reco
   }
 }
 
-async function AnalysisContent({ username }: { username: string }) {
+async function AnalysisContent({ username, isSignedIn }: { username: string; isSignedIn: boolean }) {
   let result: AnalysisResult;
 
   try {
@@ -140,7 +141,7 @@ async function AnalysisContent({ username }: { username: string }) {
             </span>
           </Link>
           <div className="hidden md:block w-96">
-            <SearchForm />
+            <SearchForm isSignedIn={isSignedIn} />
           </div>
         </div>
       </header>
@@ -455,10 +456,11 @@ async function AnalysisContent({ username }: { username: string }) {
 
 export default async function AnalyzePage({ params }: PageProps) {
   const { username } = await params;
+  const user = await getUser();
 
   return (
     <Suspense fallback={<AnalysisSkeleton />}>
-      <AnalysisContent username={decodeURIComponent(username)} />
+      <AnalysisContent username={decodeURIComponent(username)} isSignedIn={!!user} />
     </Suspense>
   );
 }
