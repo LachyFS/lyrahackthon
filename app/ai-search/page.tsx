@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,9 @@ import {
   Clock,
   ArrowDown,
   Flame,
+  Globe,
+  FileText,
+  Link as LinkIcon,
 } from "lucide-react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { SiteHeader } from "@/components/site-header";
@@ -84,6 +87,12 @@ interface RecentSearch {
   createdAt: string;
 }
 
+interface GitHubUserSuggestion {
+  login: string;
+  avatar_url: string;
+  name?: string;
+}
+
 // Scroll to bottom button that appears when not at bottom
 function ScrollToBottomButton() {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
@@ -129,6 +138,8 @@ function CollapsibleToolResult({
     switch (name) {
       case "searchGitHubProfiles":
         return "Search Results";
+      case "searchGitHubUsers":
+        return "GitHub User Search";
       case "analyzeGitHubProfile":
         return "Profile Analysis";
       case "getTopCandidates":
@@ -137,6 +148,10 @@ function CollapsibleToolResult({
         return "Email Draft";
       case "analyzeGitHubRepository":
         return "Repository Analysis";
+      case "webSearch":
+        return "Web Search Results";
+      case "scrapeUrls":
+        return "Scraped Content";
       default:
         return "Tool Result";
     }
@@ -175,6 +190,15 @@ function AISearchContent() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const roastMode = searchParams.get("roast") === "true";
   const isDev = process.env.NODE_ENV === "development";
+
+  // Autocomplete state
+  const [suggestions, setSuggestions] = useState<GitHubUserSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch user on mount
   useEffect(() => {
@@ -220,11 +244,118 @@ function AISearchContent() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || status !== "ready") return;
+    setShowSuggestions(false);
     sendMessage({ parts: [{ type: "text", text: inputValue }] });
     setInputValue("");
   };
 
   const isLoading = status === "streaming" || status === "submitted";
+
+  // Search GitHub users for autocomplete
+  const searchGitHubUsers = useCallback(async (query: string) => {
+    if (query.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/github/search-users?q=${encodeURIComponent(query)}&limit=5`);
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestions(data.users || []);
+        setSelectedSuggestionIndex(0);
+      }
+    } catch (error) {
+      console.error("Failed to search GitHub users:", error);
+      setSuggestions([]);
+    }
+  }, []);
+
+  // Handle input change with @ mention detection
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart || value.length;
+    setInputValue(value);
+
+    // Find if we're currently typing a @mention
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+    if (mentionMatch) {
+      const start = textBeforeCursor.lastIndexOf("@");
+      setMentionStart(start);
+      const query = mentionMatch[1];
+
+      // Debounce the search
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+      debounceRef.current = setTimeout(() => {
+        searchGitHubUsers(query);
+        setShowSuggestions(true);
+      }, 200);
+    } else {
+      setShowSuggestions(false);
+      setMentionStart(null);
+      setSuggestions([]);
+    }
+  };
+
+  // Apply a suggestion to the input
+  const applySuggestion = (username: string) => {
+    if (mentionStart === null) return;
+
+    const beforeMention = inputValue.slice(0, mentionStart);
+    const afterCursor = inputValue.slice(
+      mentionStart + (inputValue.slice(mentionStart).match(/@\w*/)?.length || 0)
+    );
+    const newValue = `${beforeMention}@${username}${afterCursor}`;
+
+    setInputValue(newValue);
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setMentionStart(null);
+    inputRef.current?.focus();
+  };
+
+  // Handle keyboard navigation in suggestions
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggestions || suggestions.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedSuggestionIndex((prev) =>
+        prev < suggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedSuggestionIndex((prev) =>
+        prev > 0 ? prev - 1 : suggestions.length - 1
+      );
+    } else if (e.key === "Tab" || e.key === "Enter") {
+      if (showSuggestions && suggestions.length > 0) {
+        e.preventDefault();
+        applySuggestion(suggestions[selectedSuggestionIndex].login);
+      }
+    } else if (e.key === "Escape") {
+      setShowSuggestions(false);
+    }
+  };
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Helper to get text content from message parts
   const getMessageText = (message: ChatMessage): string => {
@@ -240,6 +371,11 @@ function AISearchContent() {
   };
 
   const renderToolResult = (toolName: string, result: unknown): React.ReactNode => {
+    // Don't render anything if there's an error in the result
+    if (result && typeof result === 'object' && 'error' in result && (result as { error?: string }).error) {
+      return null;
+    }
+
     if (toolName === "searchGitHubProfiles") {
       const data = result as {
         query: string;
@@ -250,16 +386,7 @@ function AISearchContent() {
           snippet?: string;
         }>;
         total: number;
-        error?: string;
       };
-
-      if (data.error) {
-        return (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
-            <p className="text-red-400">{data.error}</p>
-          </div>
-        );
-      }
 
       const maxVisible = 5;
       const visibleProfiles = data.profiles.slice(0, maxVisible);
@@ -305,6 +432,86 @@ function AISearchContent() {
       );
     }
 
+    if (toolName === "searchGitHubUsers") {
+      const data = result as {
+        query: string;
+        total_count: number;
+        users: Array<{
+          username: string;
+          name: string | null;
+          bio: string | null;
+          location: string | null;
+          company: string | null;
+          public_repos: number | null;
+          followers: number | null;
+        }>;
+      };
+
+      const maxVisible = 5;
+      const visibleUsers = data.users.slice(0, maxVisible);
+      const remainingCount = data.users.length - maxVisible;
+
+      return (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Search className="h-4 w-4" />
+            <span>Found {data.total_count} users for &quot;{data.query}&quot;</span>
+          </div>
+          <div className="space-y-2">
+            {visibleUsers.map((user, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                <img
+                  src={`https://github.com/${user.username}.png`}
+                  alt={user.username}
+                  className="w-8 h-8 rounded-full border border-white/20"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`https://github.com/${user.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-400 hover:underline font-medium"
+                    >
+                      {user.name || user.username}
+                    </a>
+                    <span className="text-xs text-muted-foreground">@{user.username}</span>
+                  </div>
+                  {user.bio && (
+                    <p className="text-xs text-muted-foreground truncate">
+                      {user.bio}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                    {user.location && (
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3" />
+                        {user.location}
+                      </span>
+                    )}
+                    {user.followers != null && (
+                      <span>{user.followers} followers</span>
+                    )}
+                    {user.public_repos != null && (
+                      <span>{user.public_repos} repos</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {remainingCount > 0 && (
+              <div className="text-xs text-muted-foreground pl-2 pt-1">
+                + {remainingCount} more
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     if (toolName === "analyzeGitHubProfile") {
       // Note: avatar_url and github_url are not included in the API response
       // They are constructed from username to avoid sending image URLs to the LLM
@@ -328,16 +535,7 @@ function AISearchContent() {
           language: string | null;
           url: string;
         }>;
-        error?: string;
       };
-
-      if (data.error) {
-        return (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
-            <p className="text-red-400">{data.error}</p>
-          </div>
-        );
-      }
 
       const activityColors: Record<string, string> = {
         very_active: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
@@ -385,7 +583,7 @@ function AISearchContent() {
           {/* Stats */}
           <div className="grid grid-cols-4 gap-4 p-4 border-b border-white/10">
             <div className="text-center">
-              <div className="text-lg font-semibold text-white">{data.estimatedExperience.split(" ")[0]}</div>
+              <div className="text-lg font-semibold text-white">{data.estimatedExperience?.split(" ")[0] ?? "N/A"}</div>
               <div className="text-xs text-muted-foreground">Experience</div>
             </div>
             <div className="text-center">
@@ -471,7 +669,8 @@ function AISearchContent() {
           score: number;
           matchReasons: string[];
           concerns: string[];
-          experience: string;
+          accountAgeYears: number;
+          repoCount: number;
           activityLevel: string;
           topLanguages: string[];
           topics: string[];
@@ -495,30 +694,9 @@ function AISearchContent() {
         brief?: {
           requiredSkills?: string[];
           preferredLocation?: string;
-          minExperience?: string;
           projectType?: string;
         };
-        error?: string;
-        failedProfiles?: Array<{ username: string; error: string }>;
       };
-
-      if (data.error) {
-        return (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 space-y-2">
-            <p className="text-red-400">{data.error}</p>
-            {data.failedProfiles && data.failedProfiles.length > 0 && (
-              <details className="text-xs text-red-300/70">
-                <summary className="cursor-pointer hover:text-red-300">Show failed profiles ({data.failedProfiles.length})</summary>
-                <ul className="mt-2 space-y-1 pl-4">
-                  {data.failedProfiles.slice(0, 5).map((fp) => (
-                    <li key={fp.username}>@{fp.username}: {fp.error}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </div>
-        );
-      }
 
       if (!data.candidates || data.candidates.length === 0) {
         return (
@@ -590,6 +768,120 @@ function AISearchContent() {
       return <RepoAnalysisCard analysis={data as RepoAnalysis} />;
     }
 
+    if (toolName === "webSearch") {
+      const data = result as {
+        query?: string;
+        results?: Array<{
+          title: string;
+          url: string;
+          snippet?: string;
+        }>;
+      };
+
+      const results = data.results || [];
+
+      return (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Globe className="h-4 w-4" />
+            <span>Web Search</span>
+          </div>
+          {data.query && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10">
+              <Search className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+              <span className="text-sm text-white">{data.query}</span>
+            </div>
+          )}
+          {results.length > 0 ? (
+            <div className="space-y-2">
+              {results.slice(0, 5).map((result, i) => (
+                <div
+                  key={i}
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                >
+                  <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-400 hover:underline font-medium text-sm flex items-center gap-1"
+                  >
+                    {result.title}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                  {result.snippet && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {result.snippet}
+                    </p>
+                  )}
+                </div>
+              ))}
+              {results.length > 5 && (
+                <div className="text-xs text-muted-foreground pl-2 pt-1">
+                  + {results.length - 5} more results
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No results found</p>
+          )}
+        </div>
+      );
+    }
+
+    if (toolName === "scrapeUrls") {
+      const data = result as {
+        results?: Array<{
+          url: string;
+          title?: string;
+          content?: string;
+          error?: string;
+        }>;
+      };
+
+      const results = data.results || [];
+
+      return (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <FileText className="h-4 w-4" />
+            <span>Scraped {results.length} URL{results.length !== 1 ? 's' : ''}</span>
+          </div>
+          {results.length > 0 ? (
+            <div className="space-y-2">
+              {results.map((result, i) => (
+                <div
+                  key={i}
+                  className="p-2 rounded-lg bg-white/5"
+                >
+                  <div className="flex items-center gap-2">
+                    <LinkIcon className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-400 hover:underline font-medium text-sm truncate flex-1"
+                    >
+                      {result.title || result.url}
+                    </a>
+                    <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                  </div>
+                  {result.error ? (
+                    <p className="text-xs text-red-400 mt-1">{result.error}</p>
+                  ) : result.content ? (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {result.content.slice(0, 200)}{result.content.length > 200 ? '...' : ''}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No URLs scraped</p>
+          )}
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -599,22 +891,21 @@ function AISearchContent() {
       <div className="fixed inset-0 grid-bg" />
       <div className="fixed inset-0 noise-overlay pointer-events-none" />
 
-      {/* Normal mode orbs */}
-      <div className={`fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'bg-red-600/30 animate-pulse' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
-      <div className={`fixed top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'bg-orange-500/25 animate-pulse' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
-
-      {/* Extra fire orbs for roast mode */}
+      {/* Roast mode flame gradient from bottom */}
       {roastMode && (
-        <>
-          <div className="fixed bottom-[-10%] left-[20%] w-[400px] h-[400px] rounded-full bg-yellow-500/20 animate-pulse blur-3xl" />
-          <div className="fixed top-[40%] left-[50%] w-[300px] h-[300px] rounded-full bg-red-500/15 animate-bounce blur-3xl" style={{ animationDuration: '3s' }} />
-        </>
+        <div className="fixed inset-0 bg-gradient-to-t from-red-950/40 via-orange-950/20 via-40% to-transparent pointer-events-none" />
       )}
+
+      {/* Animated gradient orbs */}
+      <div className={`fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'opacity-0' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
+      <div className={`fixed top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'opacity-0' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
 
       {/* Header */}
       <SiteHeader
         navLinks={[
           { href: "/", label: "Home" },
+          { href: "/ai-search", label: "AI Chat" },
+          { href: "/ai-search?roast=true", label: "Roast" },
         ]}
         showSignIn
         user={user}
@@ -661,16 +952,14 @@ function AISearchContent() {
               <div className="flex flex-wrap justify-center gap-2">
                 {(roastMode
                   ? [
-                      "Roast torvalds' GitHub 🔥",
-                      "Destroy my own profile",
-                      "Find devs to roast in Silicon Valley",
-                      "Who has the worst commit messages?",
+                      "Roast @torvalds",
+                      "Roast my profile",
+                      "Roast a React dev",
                     ]
                   : [
-                      "Find Rust developers in Sydney",
-                      "Top React engineers on GitHub",
-                      "Machine learning experts in Europe",
-                      "Go developers with Kubernetes experience",
+                      "Rust devs in Sydney",
+                      "React engineers",
+                      "ML experts in Europe",
                     ]
                 ).map((suggestion, index) => (
                   <motion.button
@@ -678,12 +967,10 @@ function AISearchContent() {
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: 0.3 + index * 0.1 }}
-                    onClick={() => {
-                      setInputValue(suggestion);
-                    }}
-                    className={`px-4 py-2 rounded-full border text-sm transition-colors ${
+                    onClick={() => setInputValue(suggestion)}
+                    className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${
                       roastMode
-                        ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                        ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
                         : 'bg-white/5 border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white'
                     }`}
                   >
@@ -693,7 +980,7 @@ function AISearchContent() {
               </div>
 
               {/* Recent Searches Section */}
-              {!loadingRecent && recentSearches.length > 0 && (
+              {!roastMode && !loadingRecent && recentSearches.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -800,7 +1087,7 @@ function AISearchContent() {
                               // Show streaming progress for repo analysis
                               <RepoAnalysisProgress progress={toolResult as AnalysisProgress} />
                             ) : showFinalResult ? (
-                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository"}>
+                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile"}>
                                 {toolResult != null && renderToolResult(toolName, toolResult)}
                               </CollapsibleToolResult>
                             ) : toolName === "analyzeGitHubRepository" ? (
@@ -812,10 +1099,16 @@ function AISearchContent() {
                                 <span>
                                   {toolName === "searchGitHubProfiles"
                                     ? `Searching for "${(toolPart.input as { query?: string })?.query || 'profiles'}"...`
+                                    : toolName === "searchGitHubUsers"
+                                    ? `Searching GitHub users for "${(toolPart.input as { query?: string })?.query || 'users'}"...`
                                     : toolName === "getTopCandidates"
                                     ? `Ranking ${(toolPart.input as { usernames?: string[] })?.usernames?.length || 0} candidates...`
                                     : toolName === "generateDraftEmail"
                                     ? `Drafting email for ${(toolPart.input as { candidateName?: string })?.candidateName || 'candidate'}...`
+                                    : toolName === "webSearch"
+                                    ? `Searching the web for "${(toolPart.input as { query?: string })?.query || 'information'}"...`
+                                    : toolName === "scrapeUrls"
+                                    ? `Scraping ${(toolPart.input as { urls?: string[] })?.urls?.length || ''} URL${((toolPart.input as { urls?: string[] })?.urls?.length || 0) !== 1 ? 's' : ''}...`
                                     : `Analyzing ${(toolPart.input as { username?: string })?.username || 'profile'}...`}
                                 </span>
                               </div>
@@ -872,7 +1165,7 @@ function AISearchContent() {
                 )}
               </div>
               {/* Per-message debug button - Dev only */}
-              {isDev && (
+              {/* {isDev && (
                 <button
                   onClick={() => setDebugMessageId(debugMessageId === message.id ? null : message.id)}
                   className="flex-shrink-0 self-start p-1 rounded text-yellow-500/50 hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
@@ -880,7 +1173,7 @@ function AISearchContent() {
                 >
                   <Bug className="h-3 w-3" />
                 </button>
-              )}
+              )} */}
             </motion.div>
           ))}
           </AnimatePresence>
@@ -909,17 +1202,65 @@ function AISearchContent() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.2 }}
-          className={`sticky bottom-4 backdrop-blur-xl rounded-2xl border p-2 transition-all duration-500 container mx-auto px-4 md:px-6 max-w-4xl ${
+          className={`relative sticky bottom-4 backdrop-blur-xl rounded-2xl border p-2 transition-all duration-500 container mx-auto px-4 md:px-6 max-w-4xl ${
             roastMode
               ? 'bg-zinc-900/90 border-red-500/30 shadow-lg shadow-red-500/10'
               : 'bg-background/80 border-white/10'
           }`}
         >
+          {/* Autocomplete suggestions dropdown */}
+          <AnimatePresence>
+            {showSuggestions && suggestions.length > 0 && (
+              <motion.div
+                ref={suggestionsRef}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                transition={{ duration: 0.15 }}
+                className="absolute bottom-full left-0 right-0 mb-2 mx-2 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden shadow-xl"
+              >
+                <div className="p-1">
+                  <div className="px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5">
+                    <Github className="h-3 w-3" />
+                    <span>GitHub Users</span>
+                    <span className="ml-auto text-[10px] opacity-60">Tab to select</span>
+                  </div>
+                  {suggestions.map((user, index) => (
+                    <button
+                      key={user.login}
+                      type="button"
+                      onClick={() => applySuggestion(user.login)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                        index === selectedSuggestionIndex
+                          ? 'bg-emerald-500/20 text-white'
+                          : 'hover:bg-white/5 text-white/80'
+                      }`}
+                    >
+                      <img
+                        src={user.avatar_url}
+                        alt={user.login}
+                        className="w-7 h-7 rounded-full border border-white/20"
+                      />
+                      <div className="flex-1 text-left min-w-0">
+                        <div className="font-medium text-sm truncate">@{user.login}</div>
+                        {user.name && (
+                          <div className="text-xs text-muted-foreground truncate">{user.name}</div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="flex gap-2 items-center">
             <Input
+              ref={inputRef}
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={roastMode ? "Who's getting roasted today? 🔥" : "Ask me to find developers..."}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={roastMode ? "Who's getting roasted today? 🔥" : "Ask me to find developers... (type @ for users)"}
               className={`flex-1 h-12 bg-transparent border-0 focus:ring-0 focus-visible:ring-0 text-white transition-colors duration-300 ${
                 roastMode ? 'placeholder:text-red-400/60' : 'placeholder:text-muted-foreground'
               }`}

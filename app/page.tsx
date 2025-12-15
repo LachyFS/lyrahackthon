@@ -38,6 +38,8 @@ export default async function Home() {
       {/* Header */}
       <SiteHeader
         navLinks={[
+          { href: "/ai-search", label: "AI Chat" },
+          { href: "/ai-search?roast=true", label: "Roast" },
           { href: "#features", label: "Features" },
           { href: "#how-it-works", label: "How it works" },
         ]}
@@ -53,18 +55,18 @@ export default async function Home() {
             {/* Main heading */}
             <h1 className="animate-slide-up opacity-0 delay-100 text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               <span className="bg-gradient-to-b from-white via-white to-white/50 bg-clip-text text-transparent">
-                Decode developer talent
+                Find top developers
               </span>
               <br />
               <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
-                without the tech speak
+                where the code lives
               </span>
             </h1>
 
             {/* Subheading */}
             <p className="animate-slide-up opacity-0 delay-200 text-lg md:text-xl text-muted-foreground max-w-2xl mb-10">
-              Git Radar transforms complex GitHub profiles into plain-English insights.
-              Make confident hiring decisions—no technical background required.
+              Git Radar turns GitHub into your talent pipeline. Search by skills, location,
+              or activity—and get instant AI analysis of any developer&apos;s profile.
             </p>
 
             {/* Search Form */}
@@ -72,43 +74,33 @@ export default async function Home() {
               <SearchForm />
             </div>
 
-            {/* Example searches */}
-            <div className="animate-slide-up opacity-0 delay-400 flex flex-col items-center gap-3 text-sm text-muted-foreground">
-              <div className="flex flex-wrap justify-center gap-2">
-                <span>Analyze:</span>
-                <Link href="/analyze/torvalds" className="text-emerald-400 hover:underline">
-                  torvalds
-                </Link>
-                <span>·</span>
-                <Link href="/analyze/gaearon" className="text-emerald-400 hover:underline">
-                  gaearon
-                </Link>
-                <span>·</span>
-                <Link href="/analyze/sindresorhus" className="text-emerald-400 hover:underline">
-                  sindresorhus
-                </Link>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                <span>Or ask AI:</span>
-                <Link href="/ai-search?q=best%20Rust%20developers%20in%20Sydney" className="text-cyan-400 hover:underline">
-                  &quot;best Rust devs in Sydney&quot;
-                </Link>
-                <span>·</span>
-                <Link href="/ai-search?q=React%20engineers%20with%20open%20source%20contributions" className="text-cyan-400 hover:underline">
-                  &quot;React + open source&quot;
-                </Link>
-              </div>
-
-              {/* Roast Mode Button */}
-              <div className="mt-6">
-                <Link
-                  href="/ai-search?roast=true"
-                  className="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-red-600/20 to-orange-500/20 border border-red-500/30 text-red-400 hover:from-red-600/30 hover:to-orange-500/30 hover:text-red-300 hover:border-red-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-red-500/20"
-                >
-                  <Flame className="h-4 w-4 group-hover:animate-bounce" style={{ animationDuration: '0.5s' }} />
-                  <span className="font-medium">Try Roast Mode</span>
-                </Link>
-              </div>
+            {/* Quick actions */}
+            <div className="animate-slide-up opacity-0 delay-400 flex flex-wrap justify-center gap-2 text-sm">
+              <Link
+                href="/analyze/torvalds"
+                className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-colors"
+              >
+                @torvalds
+              </Link>
+              <Link
+                href="/analyze/gaearon"
+                className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white transition-colors"
+              >
+                @gaearon
+              </Link>
+              <Link
+                href="/ai-search?q=Rust%20developers%20in%20Sydney"
+                className="px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20 transition-colors"
+              >
+                Rust devs in Sydney
+              </Link>
+              <Link
+                href="/ai-search?roast=true"
+                className="px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors inline-flex items-center gap-1.5"
+              >
+                <Flame className="h-3.5 w-3.5" />
+                Roast Mode
+              </Link>
             </div>
 
             {/* Preview Card */}
@@ -175,10 +167,10 @@ export default async function Home() {
               Features
             </Badge>
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Technical vetting made simple
+              Source talent from GitHub at scale
             </h2>
             <p className="text-muted-foreground">
-              Understand a developer&apos;s real skills, experience, and work style—all from their GitHub activity.
+              Discover developers by their actual work. Filter, analyze, and shortlist—all from real GitHub data.
             </p>
           </div>
 
@@ -186,44 +178,44 @@ export default async function Home() {
             {[
               {
                 icon: Brain,
-                title: "AI-Powered Summaries",
+                title: "AI-Powered Analysis",
                 description:
-                  "Get clear, jargon-free explanations of what a developer actually does and how skilled they are.",
+                  "Instantly summarize a developer's skills, experience level, and strengths from their GitHub activity.",
                 gradient: "from-emerald-500 to-teal-500",
               },
               {
                 icon: BarChart3,
                 title: "Activity Insights",
                 description:
-                  "See how often they code, when they&apos;re most active, and whether they ship consistently.",
+                  "See commit frequency, contribution patterns, and shipping consistency at a glance.",
                 gradient: "from-cyan-500 to-blue-500",
               },
               {
                 icon: Code2,
                 title: "Tech Stack Detection",
                 description:
-                  "Instantly see which languages and technologies they use most—matched to your job requirements.",
+                  "Filter by language and framework. Match candidates to your stack requirements automatically.",
                 gradient: "from-blue-500 to-indigo-500",
               },
               {
                 icon: TrendingUp,
-                title: "Experience Level",
+                title: "Experience Signals",
                 description:
-                  "Gauge seniority from their coding history, project complexity, and how their skills have grown.",
+                  "Assess seniority from project complexity, code quality, and contribution history.",
                 gradient: "from-purple-500 to-pink-500",
               },
               {
                 icon: Users,
-                title: "Team Player Signals",
+                title: "Open Source Activity",
                 description:
-                  "Discover how they collaborate—do they contribute to open source, review code, or work solo?",
+                  "Surface developers who contribute to popular projects and collaborate in the open.",
                 gradient: "from-pink-500 to-rose-500",
               },
               {
                 icon: Shield,
-                title: "Red Flag Alerts",
+                title: "Quality Indicators",
                 description:
-                  "Spot warning signs like long gaps in activity, abandoned projects, or inflated contribution counts.",
+                  "Identify red flags like stale profiles, abandoned projects, or inconsistent activity.",
                 gradient: "from-orange-500 to-amber-500",
               },
             ].map((feature, i) => (
@@ -265,10 +257,10 @@ export default async function Home() {
                 How it works
               </Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                From GitHub profile to hiring insight in seconds
+                From GitHub search to candidate shortlist in seconds
               </h2>
               <p className="text-muted-foreground">
-                No technical expertise needed. Just enter a username and let Git Radar do the rest.
+                Search, analyze, and evaluate developers—all from one place.
               </p>
             </div>
 
@@ -276,23 +268,23 @@ export default async function Home() {
               {[
                 {
                   step: "01",
-                  title: "Paste a GitHub Username",
+                  title: "Search or Enter a Username",
                   description:
-                    "Enter any developer&apos;s GitHub username or profile URL—no signup required to get started.",
+                    "Use AI search to find developers by skills and location, or analyze a specific GitHub profile directly.",
                   icon: Search,
                 },
                 {
                   step: "02",
-                  title: "We Do the Heavy Lifting",
+                  title: "We Analyze the Data",
                   description:
-                    "Git Radar analyzes their repositories, commit history, contributions, and coding patterns.",
+                    "Git Radar processes repos, commits, contributions, and coding patterns to build a complete picture.",
                   icon: Zap,
                 },
                 {
                   step: "03",
-                  title: "Review Your Report",
+                  title: "Review and Shortlist",
                   description:
-                    "Get a clear summary with skills, experience level, work habits, and any red flags to watch for.",
+                    "Get detailed profiles with skills breakdown, activity metrics, and AI-powered insights.",
                   icon: BarChart3,
                 },
               ].map((item, i) => (
@@ -338,10 +330,10 @@ export default async function Home() {
               <div className="absolute bottom-0 right-0 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl" />
 
               <h2 className="relative text-3xl md:text-4xl font-bold mb-4">
-                Stop guessing. Start hiring with confidence.
+                GitHub is the best talent pool. Start sourcing from it.
               </h2>
               <p className="relative text-muted-foreground max-w-xl mx-auto mb-8">
-                Sign in with GitHub to unlock higher rate limits, save candidate profiles, and build your shortlist.
+                Sign in with GitHub for higher API limits, saved searches, and candidate shortlists.
               </p>
               <form action={signInWithGitHub} className="relative">
                 <Button
@@ -366,7 +358,7 @@ export default async function Home() {
               <GitRadarLogoWave className="h-5 w-5" />
               <span>Git Radar</span>
               <span className="mx-2">·</span>
-              <span>Technical hiring insights for everyone</span>
+              <span>Source developers from GitHub</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
               <Link href="#" className="hover:text-white transition-colors">

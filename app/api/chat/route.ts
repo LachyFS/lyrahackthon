@@ -143,19 +143,6 @@ async function analyzeGitHubProfileTool(username: string, token: string | null) 
       .filter((r) => new Date(r.updated_at) > thirtyDaysAgo)
       .length;
 
-    // Experience estimation - improved heuristics
-    let estimatedExperience = "Entry-level (0-2 years)";
-    const hasSignificantProjects = totalStars >= 50 || ownRepos.some((r) => r.stargazers_count >= 20);
-    const hasVariedLanguages = languages.length >= 3;
-
-    if (accountAge >= 8 && ownRepos.length >= 40 && hasSignificantProjects) {
-      estimatedExperience = "Senior (8+ years)";
-    } else if (accountAge >= 5 && ownRepos.length >= 25 && hasVariedLanguages) {
-      estimatedExperience = "Mid-level (5-8 years)";
-    } else if (accountAge >= 2 && ownRepos.length >= 10) {
-      estimatedExperience = "Junior (2-5 years)";
-    }
-
     // Hirability signals
     const isHireable = profile.hireable === true;
     const hasEmail = !!profile.email;
@@ -182,7 +169,6 @@ async function analyzeGitHubProfileTool(username: string, token: string | null) 
       languages,
       topics: Array.from(allTopics).slice(0, 15),
       activityLevel,
-      estimatedExperience,
       topRepos,
       recentEventsCount: recentEvents30,
       recentlyActiveRepos,
@@ -468,7 +454,8 @@ interface CandidateScore {
   score: number;
   matchReasons: string[];
   concerns: string[];
-  experience: string;
+  accountAgeYears: number;
+  repoCount: number;
   activityLevel: string;
   topLanguages: string[];
   topics: string[];
@@ -525,7 +512,6 @@ async function getTopCandidates(
   brief: {
     requiredSkills?: string[];
     preferredLocation?: string;
-    minExperience?: string;
     projectType?: string;
   },
   searchQuery?: string
@@ -556,8 +542,8 @@ async function getTopCandidates(
       if (!profile.username || !profile.languages || !profile.topics ||
           !profile.topRepos || !profile.signals || !profile.contributionStats ||
           profile.totalStars === undefined || profile.followers === undefined ||
-          profile.recentlyActiveRepos === undefined || !profile.estimatedExperience ||
-          !profile.activityLevel) {
+          profile.recentlyActiveRepos === undefined || profile.accountAge === undefined ||
+          profile.public_repos === undefined || !profile.activityLevel) {
         failedProfiles.push({ username: usernamesToAnalyze[i], error: "Incomplete profile data" });
         continue;
       }
@@ -606,22 +592,16 @@ async function getTopCandidates(
         }
       }
 
-      // Score based on experience
-      if (brief.minExperience) {
-        const expLevels = ["Entry-level", "Junior", "Mid-level", "Senior"];
-        const requiredLevel = expLevels.findIndex((l) => brief.minExperience?.toLowerCase().includes(l.toLowerCase()));
-        const actualLevel = expLevels.findIndex((l) => profile.estimatedExperience.includes(l));
-
-        if (actualLevel >= requiredLevel) {
-          score += 12;
-          matchReasons.push(`${profile.estimatedExperience}`);
-        } else if (actualLevel === requiredLevel - 1) {
-          // Close to requirement
-          concerns.push(`Experience slightly below requirement (${profile.estimatedExperience})`);
-        } else {
-          score -= 10;
-          concerns.push(`Experience level below requirement`);
-        }
+      // Score based on account maturity (account age + repo count)
+      // Bonus for established accounts with substantial work
+      if (profile.accountAge >= 5 && profile.public_repos >= 20) {
+        score += 12;
+        matchReasons.push(`${profile.accountAge}+ years on GitHub with ${profile.public_repos} repos`);
+      } else if (profile.accountAge >= 3 && profile.public_repos >= 10) {
+        score += 8;
+        matchReasons.push(`${profile.accountAge} years on GitHub`);
+      } else if (profile.accountAge >= 1 && profile.public_repos >= 5) {
+        score += 4;
       }
 
       // Score based on activity level
@@ -716,7 +696,8 @@ async function getTopCandidates(
         score: Math.min(100, Math.max(0, score)),
         matchReasons,
         concerns,
-        experience: profile.estimatedExperience,
+        accountAgeYears: profile.accountAge,
+        repoCount: profile.public_repos,
         activityLevel: profile.activityLevel,
         topLanguages: profile.languages.slice(0, 5).map((l) => l.name),
         topics: profile.topics.slice(0, 8),
@@ -829,11 +810,12 @@ You have access to these tools:
 7. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
 **Outreach tools:**
-8. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool returns an editable email draft that the user can customize before sending.
+8. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
 - Do NOT write text summaries of candidates after the tool call. The tool output IS the presentation.
+- When drafting emails, ALWAYS use generateDraftEmail to display the draft. The tool renders an editable email UI. Do NOT repeat the email subject, body, or any email content in text after the tool call.
 - Only add brief conversational messages before tool calls (e.g., "Let me search for React developers in London...") or after if needed to clarify or suggest next steps.
 - NEVER include image URLs, avatar URLs, or any image markdown in your text responses. The UI handles all visual elements.
 
@@ -860,7 +842,7 @@ For additional research on candidates:
 Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`;
 
   const result = streamText({
-    model: 'xai/grok-4.1-fast-reasoning',
+    model: 'anthropic/claude-sonnet-4.5',
     system: roastMode ? roastModePrompt : normalPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(10),
@@ -905,7 +887,6 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
           brief: z.object({
             requiredSkills: z.array(z.string()).optional().describe("Required programming languages or technologies, e.g. ['Rust', 'Python', 'TypeScript']"),
             preferredLocation: z.string().optional().describe("Preferred location or region, e.g. 'Sydney' or 'Europe'"),
-            minExperience: z.string().optional().describe("Minimum experience level: 'Entry-level', 'Junior', 'Mid-level', or 'Senior'"),
             projectType: z.string().optional().describe("Type of projects to look for, e.g. 'web', 'machine learning', 'blockchain'"),
           }).describe("The hiring brief with requirements to match candidates against"),
           searchQuery: z.string().optional().describe("The original search query used to find these candidates, for tracking purposes"),

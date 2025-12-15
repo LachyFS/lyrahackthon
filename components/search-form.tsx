@@ -68,44 +68,27 @@ export function SearchForm() {
 
   return (
     <form onSubmit={handleSubmit} className="relative">
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-          <Input
-            type="text"
-            placeholder="GitHub username, URL, or ask AI (e.g. 'best Rust devs in Sydney')..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="h-14 pl-12 pr-4 text-lg bg-white/5 border-white/10 focus:border-emerald-500/50 focus:ring-emerald-500/20"
-          />
-        </div>
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground pointer-events-none" />
+        <Input
+          type="text"
+          placeholder="Search developers or enter a username..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="h-14 pl-12 pr-28 text-lg bg-white/5 border-white/10 focus:border-emerald-500/50 focus:ring-emerald-500/20 rounded-xl"
+        />
         <Button
           type="submit"
           disabled={isLoading || !query.trim()}
-          size="lg"
-          className="h-14 px-8 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-medium"
+          className="absolute right-2 top-1/2 -translate-y-1/2 h-10 px-5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg"
         >
           {isLoading ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : isUsername ? (
-            <>
-              Analyze
-              <Search className="ml-2 h-4 w-4" />
-            </>
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <>
-              Ask AI
-              <Brain className="ml-2 h-4 w-4" />
-            </>
+            "Search"
           )}
         </Button>
       </div>
-      {query.trim() && !isUsername && (
-        <p className="mt-2 text-sm text-cyan-400/70 flex items-center gap-1">
-          <Brain className="h-3 w-3" />
-          AI search - will find developers matching your query
-        </p>
-      )}
     </form>
   );
 }

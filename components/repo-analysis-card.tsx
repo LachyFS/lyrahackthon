@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { LanguageIcon } from "@/components/language-icon";
 import {
   Code2,
   CheckCircle,
@@ -107,7 +108,7 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
   const recommendation = getRecommendationStyle(analysis.hiringRecommendation ?? "maybe");
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
+    <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden min-w-[400px]">
       {/* Header */}
       <div className="p-4 border-b border-white/10">
         <div className="flex items-start justify-between gap-4">
@@ -141,7 +142,8 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
         {/* Quick badges */}
         <div className="flex flex-wrap gap-2 mt-3">
           {analysis.primaryLanguages?.slice(0, 4).map((lang) => (
-            <Badge key={lang} variant="outline" className="text-xs">
+            <Badge key={lang} variant="outline" className="text-xs inline-flex items-center gap-1.5">
+              <LanguageIcon language={lang} size="sm" />
               {lang}
             </Badge>
           ))}
@@ -444,7 +446,7 @@ export function RepoAnalysisProgress({ progress }: { progress: AnalysisProgress 
       case 'spinning_up_sandbox': return 'Setting Up Virtual Environment';
       case 'cloning_repository': return 'Cloning Repository';
       case 'executing_command': return 'Running Analysis';
-      case 'analyzing': return 'Processing Results';
+      case 'analyzing': return 'AI agent analyzing codebase in sandbox';
       case 'generating_report': return 'Generating Report';
       case 'error': return 'Error';
       default: return 'Analyzing...';
