@@ -842,7 +842,7 @@ For additional research on candidates:
 Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`;
 
   const result = streamText({
-    model: 'anthropic/claude-sonnet-4.5',
+    model: 'grok-4.1-fast-reasoning',
     system: roastMode ? roastModePrompt : normalPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(10),
