@@ -22,3 +22,63 @@ export async function setCache<T>(
 export async function invalidateCache(key: string): Promise<void> {
   await redis.del(key);
 }
+
+// Rate limiting for AI generation endpoints
+export interface RateLimitResult {
+  success: boolean;
+  remaining: number;
+  reset: number;
+  limit: number;
+}
+
+export async function checkRateLimit(
+  identifier: string,
+  limit: number = 10,
+  windowSeconds: number = 60
+): Promise<RateLimitResult> {
+  const key = `ratelimit:${identifier}`;
+
+  try {
+    // Get current count
+    const current = await redis.get<number>(key);
+    const count = current || 0;
+
+    if (count >= limit) {
+      // Get TTL to know when the window resets
+      const ttl = await redis.ttl(key);
+      return {
+        success: false,
+        remaining: 0,
+        reset: Date.now() + (ttl > 0 ? ttl * 1000 : windowSeconds * 1000),
+        limit,
+      };
+    }
+
+    // Increment counter
+    const pipeline = redis.pipeline();
+    pipeline.incr(key);
+
+    // Set expiry only if this is the first request in the window
+    if (count === 0) {
+      pipeline.expire(key, windowSeconds);
+    }
+
+    await pipeline.exec();
+
+    return {
+      success: true,
+      remaining: limit - count - 1,
+      reset: Date.now() + windowSeconds * 1000,
+      limit,
+    };
+  } catch (error) {
+    // If Redis fails, allow the request (fail open)
+    console.error("Rate limit check failed:", error);
+    return {
+      success: true,
+      remaining: limit,
+      reset: Date.now() + windowSeconds * 1000,
+      limit,
+    };
+  }
+}
