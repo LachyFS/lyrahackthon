@@ -2,11 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { analyzeGitHubProfile } from "@/lib/actions/github-analyze";
 import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/redis";
+import { checkBotId } from "botid/server";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ username: string }> }
 ) {
+  // Vercel BotID Protection - reject requests from bots
+  const verification = await checkBotId();
+  if (verification.isBot) {
+    return NextResponse.json(
+      { error: "Automated requests are not allowed." },
+      { status: 403 }
+    );
+  }
+
   // Require authentication for AI generation
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
