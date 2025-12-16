@@ -20,7 +20,6 @@
 ---
 
 ## What It Does
-
 Git Radar transforms GitHub profiles into actionable hiring insights. Search for developers using natural language queries like "Rust developers in Sydney" or analyze any GitHub profile to get an instant AI-powered assessment of their skills, activity, and collaboration patterns.
 
 ## Demo
