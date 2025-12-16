@@ -2,6 +2,7 @@ import { streamText } from "ai";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/redis";
+import { checkBotId } from "botid/server";
 
 const requestSchema = z.object({
   analysis: z.object({
@@ -42,6 +43,15 @@ const requestSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  // Vercel BotID Protection - reject requests from bots
+  const verification = await checkBotId();
+  if (verification.isBot) {
+    return new Response(
+      JSON.stringify({ error: "Automated requests are not allowed." }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   // Require authentication for AI generation
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

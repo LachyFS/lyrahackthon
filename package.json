@@ -51,6 +51,7 @@
     "@vercel/sandbox": "^1.1.0",
     "@xyflow/react": "^12.10.0",
     "ai": "6.0.0-beta.150",
+    "botid": "^1.5.10",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

@@ -7,6 +7,7 @@ import { db } from "@/src/db";
 import { searchHistory } from "@/src/db/schema";
 import { analyzeRepositoryWithProgress, quickRepoCheck, type AnalysisProgress } from "@/lib/actions/repo-analyze";
 import { checkRateLimit } from "@/lib/redis";
+import { checkBotId } from "botid/server";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
@@ -753,6 +754,15 @@ async function getTopCandidates(
 }
 
 export async function POST(req: Request) {
+  // Vercel BotID Protection - reject requests from bots
+  const verification = await checkBotId();
+  if (verification.isBot) {
+    return new Response(
+      JSON.stringify({ error: "Automated requests are not allowed." }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   // Require authentication for AI generation
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
