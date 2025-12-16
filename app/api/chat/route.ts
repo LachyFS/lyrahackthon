@@ -752,7 +752,7 @@ async function getTopCandidates(
     };
   }
 }
-
+ 
 export async function POST(req: Request) {
   // Vercel BotID Protection - reject requests from bots
   const verification = await checkBotId();
