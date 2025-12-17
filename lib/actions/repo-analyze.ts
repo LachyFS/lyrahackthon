@@ -187,6 +187,61 @@ export interface AnalysisProgress {
 }
 
 // ============================================================================
+// PARALLEL ANALYSIS TYPES
+// ============================================================================
+
+export interface ParallelRepoAnalysisConfig {
+  repoUrls: string[];
+  /**
+   * Maximum time each sandbox can run (default: 5 minutes)
+   */
+  timeout?: string;
+  /**
+   * Optional hiring brief to contextualize the analysis
+   */
+  hiringBrief?: string;
+  /**
+   * Number of vCPUs for each sandbox (default: 2)
+   */
+  vcpus?: 1 | 2 | 4;
+  /**
+   * Maximum number of repos to analyze concurrently (default: 3)
+   */
+  concurrency?: number;
+}
+
+export interface ParallelRepoProgress {
+  repoUrl: string;
+  repoName: string;
+  repoOwner: string;
+  status: AnalysisProgressStatus;
+  message: string;
+  stepNumber?: number;
+  totalSteps?: number;
+  result?: RepoAnalysis;
+  error?: string;
+}
+
+export interface ParallelAnalysisProgress {
+  type: 'repo_update' | 'overall_update' | 'complete';
+  message: string;
+  /** Progress for each individual repo */
+  repos: ParallelRepoProgress[];
+  /** Number of completed repos */
+  completedCount: number;
+  /** Total number of repos being analyzed */
+  totalCount: number;
+  /** All final results when complete */
+  results?: Array<{
+    repoUrl: string;
+    repoName: string;
+    repoOwner: string;
+    result?: RepoAnalysis;
+    error?: string;
+  }>;
+}
+
+// ============================================================================
 // UTILITIES
 // ============================================================================
 
@@ -881,6 +936,275 @@ export async function analyzeRepository(
   }
 
   throw new Error('Analysis failed: No result returned');
+}
+
+// ============================================================================
+// PARALLEL REPO ANALYSIS
+// ============================================================================
+
+/**
+ * Helper to parse repo URL and extract owner/name
+ */
+function parseRepoUrl(repoUrl: string): { owner: string; name: string } | null {
+  const urlMatch = repoUrl.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/);
+  if (!urlMatch) return null;
+  return { owner: urlMatch[1], name: urlMatch[2] };
+}
+
+/**
+ * Analyze multiple GitHub repositories in parallel with streaming progress updates.
+ *
+ * This function manages concurrent sandbox executions and aggregates progress
+ * from all repositories into a unified stream.
+ *
+ * @param config Configuration including array of repo URLs and optional settings
+ * @yields ParallelAnalysisProgress updates for each repo and overall progress
+ */
+export async function* analyzeMultipleRepositoriesWithProgress(
+  config: ParallelRepoAnalysisConfig
+): AsyncGenerator<ParallelAnalysisProgress, ParallelAnalysisProgress, unknown> {
+  const {
+    repoUrls,
+    timeout = "5m",
+    hiringBrief,
+    vcpus = 2,
+    concurrency = 3
+  } = config;
+
+  // Validate and parse all URLs first
+  const repoInfos: Array<{ url: string; owner: string; name: string }> = [];
+  const invalidUrls: string[] = [];
+
+  for (const url of repoUrls) {
+    const parsed = parseRepoUrl(url);
+    if (parsed) {
+      repoInfos.push({ url, owner: parsed.owner, name: parsed.name });
+    } else {
+      invalidUrls.push(url);
+    }
+  }
+
+  // Initialize progress tracking for all repos
+  const repoProgress: Map<string, ParallelRepoProgress> = new Map();
+
+  for (const info of repoInfos) {
+    repoProgress.set(info.url, {
+      repoUrl: info.url,
+      repoName: info.name,
+      repoOwner: info.owner,
+      status: 'validating',
+      message: 'Waiting to start...',
+    });
+  }
+
+  // Add invalid URLs as errors
+  for (const url of invalidUrls) {
+    repoProgress.set(url, {
+      repoUrl: url,
+      repoName: 'unknown',
+      repoOwner: 'unknown',
+      status: 'error',
+      message: 'Invalid GitHub repository URL',
+      error: 'Expected format: https://github.com/owner/repo',
+    });
+  }
+
+  const totalCount = repoUrls.length;
+  let completedCount = invalidUrls.length; // Invalid URLs are already "complete" (failed)
+
+  // Helper to create current progress snapshot
+  const createProgressSnapshot = (
+    type: 'repo_update' | 'overall_update' | 'complete',
+    message: string
+  ): ParallelAnalysisProgress => ({
+    type,
+    message,
+    repos: Array.from(repoProgress.values()),
+    completedCount,
+    totalCount,
+  });
+
+  // Yield initial state
+  yield createProgressSnapshot(
+    'overall_update',
+    `Starting analysis of ${repoInfos.length} repositories...`
+  );
+
+  // Results accumulator
+  const results: Array<{
+    repoUrl: string;
+    repoName: string;
+    repoOwner: string;
+    result?: RepoAnalysis;
+    error?: string;
+  }> = [];
+
+  // Add invalid URLs to results
+  for (const url of invalidUrls) {
+    results.push({
+      repoUrl: url,
+      repoName: 'unknown',
+      repoOwner: 'unknown',
+      error: 'Invalid GitHub repository URL',
+    });
+  }
+
+  // Process repos with controlled concurrency
+  const validRepos = [...repoInfos];
+  const activeAnalyses: Map<string, AsyncGenerator<AnalysisProgress, AnalysisProgress, unknown>> = new Map();
+  let repoIndex = 0;
+
+  // Start initial batch of analyses
+  while (repoIndex < validRepos.length && activeAnalyses.size < concurrency) {
+    const info = validRepos[repoIndex];
+    const generator = analyzeRepositoryWithProgress({
+      repoUrl: info.url,
+      timeout,
+      hiringBrief,
+      vcpus,
+    });
+    activeAnalyses.set(info.url, generator);
+    repoIndex++;
+  }
+
+  // Process all analyses
+  while (activeAnalyses.size > 0) {
+    // Poll each active analysis for progress
+    const pollPromises: Array<Promise<{ url: string; result: IteratorResult<AnalysisProgress, AnalysisProgress> }>> = [];
+
+    for (const [url, generator] of activeAnalyses) {
+      pollPromises.push(
+        generator.next().then(result => ({ url, result }))
+      );
+    }
+
+    // Wait for any progress from any repo
+    const settled = await Promise.race(
+      pollPromises.map(async (promise) => {
+        const { url, result } = await promise;
+        return { url, result };
+      })
+    );
+
+    const { url, result } = settled;
+    const info = validRepos.find(r => r.url === url)!;
+
+    if (result.done) {
+      // This analysis is complete
+      activeAnalyses.delete(url);
+      const finalProgress = result.value;
+
+      // Update repo progress
+      const updatedProgress: ParallelRepoProgress = {
+        repoUrl: url,
+        repoName: info.name,
+        repoOwner: info.owner,
+        status: finalProgress.status,
+        message: finalProgress.message,
+        stepNumber: finalProgress.stepNumber,
+        totalSteps: finalProgress.totalSteps,
+        result: finalProgress.result,
+        error: finalProgress.error,
+      };
+      repoProgress.set(url, updatedProgress);
+      completedCount++;
+
+      // Add to results
+      results.push({
+        repoUrl: url,
+        repoName: info.name,
+        repoOwner: info.owner,
+        result: finalProgress.result,
+        error: finalProgress.error,
+      });
+
+      // Yield completion update for this repo
+      yield createProgressSnapshot(
+        'repo_update',
+        `Completed analysis of ${info.owner}/${info.name} (${completedCount}/${totalCount})`
+      );
+
+      // Start next repo if available
+      if (repoIndex < validRepos.length) {
+        const nextInfo = validRepos[repoIndex];
+        const nextGenerator = analyzeRepositoryWithProgress({
+          repoUrl: nextInfo.url,
+          timeout,
+          hiringBrief,
+          vcpus,
+        });
+        activeAnalyses.set(nextInfo.url, nextGenerator);
+        repoIndex++;
+
+        // Update status for the newly started repo
+        repoProgress.set(nextInfo.url, {
+          repoUrl: nextInfo.url,
+          repoName: nextInfo.name,
+          repoOwner: nextInfo.owner,
+          status: 'spinning_up_sandbox',
+          message: 'Starting analysis...',
+        });
+      }
+    } else {
+      // Intermediate progress update
+      const progress = result.value;
+
+      const updatedProgress: ParallelRepoProgress = {
+        repoUrl: url,
+        repoName: progress.repoName || info.name,
+        repoOwner: progress.repoOwner || info.owner,
+        status: progress.status,
+        message: progress.message,
+        stepNumber: progress.stepNumber,
+        totalSteps: progress.totalSteps,
+      };
+      repoProgress.set(url, updatedProgress);
+
+      // Yield progress update
+      yield createProgressSnapshot(
+        'repo_update',
+        `[${info.owner}/${info.name}] ${progress.message}`
+      );
+    }
+  }
+
+  // Final complete state
+  const finalProgress: ParallelAnalysisProgress = {
+    type: 'complete',
+    message: `Completed analysis of ${completedCount} repositories`,
+    repos: Array.from(repoProgress.values()),
+    completedCount,
+    totalCount,
+    results,
+  };
+
+  yield finalProgress;
+  return finalProgress;
+}
+
+/**
+ * Simple wrapper that returns all results without streaming progress
+ */
+export async function analyzeMultipleRepositories(
+  config: ParallelRepoAnalysisConfig
+): Promise<Array<{
+  repoUrl: string;
+  repoName: string;
+  repoOwner: string;
+  result?: RepoAnalysis;
+  error?: string;
+}>> {
+  let lastProgress: ParallelAnalysisProgress | undefined;
+
+  for await (const progress of analyzeMultipleRepositoriesWithProgress(config)) {
+    lastProgress = progress;
+  }
+
+  if (lastProgress?.type === 'complete' && lastProgress.results) {
+    return lastProgress.results;
+  }
+
+  throw new Error('Parallel analysis failed: No results returned');
 }
 
 // ============================================================================
