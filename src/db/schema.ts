@@ -7,10 +7,8 @@ import {
   integer,
   boolean,
   jsonb,
-  primaryKey,
   index,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
 
 // Create a private schema for DevShowcase
 export const devshowcase = pgSchema("devshowcase");
@@ -56,131 +54,6 @@ export const profiles = devshowcase.table(
   ]
 ).enableRLS();
 
-// ============================================
-// POSTS - Projects/work shared by engineers
-// ============================================
-export const posts = devshowcase.table(
-  "posts",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    authorId: uuid("author_id")
-      .notNull()
-      .references(() => profiles.id, { onDelete: "cascade" }),
-    // Post content
-    title: varchar("title", { length: 255 }).notNull(),
-    description: text("description"),
-    // Media
-    images: jsonb("images").$type<string[]>().default([]),
-    // GitHub repo link (optional)
-    repoUrl: text("repo_url"),
-    repoName: text("repo_name"),
-    repoOwner: text("repo_owner"),
-    // Repo metadata (if linked)
-    repoStars: integer("repo_stars"),
-    repoForks: integer("repo_forks"),
-    repoLanguage: varchar("repo_language", { length: 100 }),
-    // External links
-    demoUrl: text("demo_url"),
-    // Tags/tech stack
-    tags: jsonb("tags").$type<string[]>().default([]),
-    // Post flags
-    lookingForCollaborators: boolean("looking_for_collaborators").default(false),
-    // Counts (denormalized for performance)
-    likesCount: integer("likes_count").default(0),
-    commentsCount: integer("comments_count").default(0),
-    // Timestamps
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table: any) => [
-    index("posts_author_id_idx").on(table.authorId),
-    index("posts_created_at_idx").on(table.createdAt),
-    index("posts_tags_idx").on(table.tags),
-  ]
-).enableRLS();
-
-// ============================================
-// FOLLOWS - User following relationships
-// ============================================
-export const follows = devshowcase.table(
-  "follows",
-  {
-    followerId: uuid("follower_id")
-      .notNull()
-      .references(() => profiles.id, { onDelete: "cascade" }),
-    followingId: uuid("following_id")
-      .notNull()
-      .references(() => profiles.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (table: any) => [
-    primaryKey({ columns: [table.followerId, table.followingId] }),
-    index("follows_follower_id_idx").on(table.followerId),
-    index("follows_following_id_idx").on(table.followingId),
-  ]
-).enableRLS();
-
-// ============================================
-// LIKES - Post likes
-// ============================================
-export const likes = devshowcase.table(
-  "likes",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => profiles.id, { onDelete: "cascade" }),
-    postId: uuid("post_id")
-      .notNull()
-      .references(() => posts.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (table: any) => [
-    primaryKey({ columns: [table.userId, table.postId] }),
-    index("likes_post_id_idx").on(table.postId),
-  ]
-).enableRLS();
-
-// ============================================
-// WISHLISTS - What developers are looking for
-// ============================================
-export const wishlists = devshowcase.table(
-  "wishlists",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    profileId: uuid("profile_id")
-      .notNull()
-      .references(() => profiles.id, { onDelete: "cascade" }),
-    // What they're looking for
-    type: varchar("type", { length: 50 }).notNull(), // 'job', 'collaboration', 'mentorship', 'cofounding', 'freelance'
-    title: varchar("title", { length: 255 }).notNull(),
-    description: text("description"),
-    // Preferences
-    roleType: varchar("role_type", { length: 100 }), // 'frontend', 'backend', 'fullstack', 'devops', etc.
-    workStyle: varchar("work_style", { length: 50 }), // 'remote', 'hybrid', 'onsite'
-    location: text("location"), // Preferred location if onsite/hybrid
-    salaryMin: integer("salary_min"),
-    salaryMax: integer("salary_max"),
-    salaryCurrency: varchar("salary_currency", { length: 10 }).default("USD"),
-    // Tech preferences
-    techStack: jsonb("tech_stack").$type<string[]>().default([]),
-    // Company preferences
-    companySize: varchar("company_size", { length: 50 }), // 'startup', 'mid', 'enterprise', 'any'
-    industries: jsonb("industries").$type<string[]>().default([]),
-    // Availability
-    availability: varchar("availability", { length: 50 }), // 'immediately', '2weeks', '1month', '3months', 'passive'
-    hoursPerWeek: integer("hours_per_week"), // For freelance/part-time
-    // Status
-    isActive: boolean("is_active").default(true),
-    // Timestamps
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table: any) => [
-    index("wishlists_profile_id_idx").on(table.profileId),
-    index("wishlists_type_idx").on(table.type),
-    index("wishlists_is_active_idx").on(table.isActive),
-  ]
-).enableRLS();
 
 // ============================================
 // SEARCH HISTORY - Discovered/searched GitHub accounts
@@ -210,108 +83,10 @@ export const searchHistory = devshowcase.table(
   ]
 ).enableRLS();
 
-// ============================================
-// COMMENTS - Post comments
-// ============================================
-export const comments = devshowcase.table(
-  "comments",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    postId: uuid("post_id")
-      .notNull()
-      .references(() => posts.id, { onDelete: "cascade" }),
-    authorId: uuid("author_id")
-      .notNull()
-      .references(() => profiles.id, { onDelete: "cascade" }),
-    content: text("content").notNull(),
-    // For threaded comments (optional)
-    parentId: uuid("parent_id"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table: any) => [
-    index("comments_post_id_idx").on(table.postId),
-    index("comments_author_id_idx").on(table.authorId),
-  ]
-).enableRLS();
 
-// ============================================
-// RELATIONS
-// ============================================
-export const profilesRelations = relations(profiles, ({ many }) => ({
-  posts: many(posts),
-  comments: many(comments),
-  likes: many(likes),
-  followers: many(follows, { relationName: "following" }),
-  following: many(follows, { relationName: "followers" }),
-  wishlists: many(wishlists),
-}));
-
-export const postsRelations = relations(posts, ({ one, many }) => ({
-  author: one(profiles, {
-    fields: [posts.authorId],
-    references: [profiles.id],
-  }),
-  comments: many(comments),
-  likes: many(likes),
-}));
-
-export const followsRelations = relations(follows, ({ one }) => ({
-  follower: one(profiles, {
-    fields: [follows.followerId],
-    references: [profiles.id],
-    relationName: "followers",
-  }),
-  following: one(profiles, {
-    fields: [follows.followingId],
-    references: [profiles.id],
-    relationName: "following",
-  }),
-}));
-
-export const likesRelations = relations(likes, ({ one }) => ({
-  user: one(profiles, {
-    fields: [likes.userId],
-    references: [profiles.id],
-  }),
-  post: one(posts, {
-    fields: [likes.postId],
-    references: [posts.id],
-  }),
-}));
-
-export const commentsRelations = relations(comments, ({ one }) => ({
-  post: one(posts, {
-    fields: [comments.postId],
-    references: [posts.id],
-  }),
-  author: one(profiles, {
-    fields: [comments.authorId],
-    references: [profiles.id],
-  }),
-  parent: one(comments, {
-    fields: [comments.parentId],
-    references: [comments.id],
-  }),
-}));
-
-export const wishlistsRelations = relations(wishlists, ({ one }) => ({
-  profile: one(profiles, {
-    fields: [wishlists.profileId],
-    references: [profiles.id],
-  }),
-}));
 
 // Type exports for use in application
 export type Profile = typeof profiles.$inferSelect;
 export type NewProfile = typeof profiles.$inferInsert;
-export type Post = typeof posts.$inferSelect;
-export type NewPost = typeof posts.$inferInsert;
-export type Follow = typeof follows.$inferSelect;
-export type Like = typeof likes.$inferSelect;
-export type Comment = typeof comments.$inferSelect;
-export type NewComment = typeof comments.$inferInsert;
-export type Wishlist = typeof wishlists.$inferSelect;
-export type NewWishlist = typeof wishlists.$inferInsert;
 export type SearchHistory = typeof searchHistory.$inferSelect;
 export type NewSearchHistory = typeof searchHistory.$inferInsert;
