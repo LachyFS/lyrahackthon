@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { analyzeGitHubProfile, type AnalysisResult } from "@/lib/actions/github-analyze";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   BarChart3,
-  ArrowLeft,
   MapPin,
   Building2,
   Link as LinkIcon,
@@ -22,13 +20,13 @@ import {
   CheckCircle,
   Clock,
   ExternalLink,
-  Brain,
   Loader2,
 } from "lucide-react";
-import { SearchForm } from "@/components/search-form";
 import { AISummary } from "@/components/ai-summary";
 import { CollaborationGraph } from "@/components/collaboration-graph";
 import { getUser } from "@/lib/actions/auth";
+import { AppLayout } from "@/components/app-layout";
+import { User } from "@supabase/supabase-js";
 
 interface PageProps {
   params: Promise<{ username: string }>;
@@ -36,28 +34,14 @@ interface PageProps {
 
 function AnalysisSkeleton() {
   return (
-    <div className="min-h-screen bg-background">
-      <div className="fixed inset-0 grid-bg" />
-      <div className="fixed inset-0 noise-overlay pointer-events-none" />
-
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
-            <BarChart3 className="h-6 w-6 text-emerald-400" />
-            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              Git Radar
-            </span>
-          </Link>
-        </div>
-      </header>
-
-      <main className="relative z-10 container mx-auto px-4 md:px-6 py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
-          <p className="text-lg text-muted-foreground">Analyzing GitHub profile...</p>
-          <p className="text-sm text-muted-foreground">This may take a few seconds</p>
-        </div>
-      </main>
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="absolute inset-0 grid-bg" />
+      <div className="absolute inset-0 noise-overlay pointer-events-none" />
+      <div className="relative z-10 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
+        <p className="text-lg text-muted-foreground">Analyzing GitHub profile...</p>
+        <p className="text-sm text-muted-foreground">This may take a few seconds</p>
+      </div>
     </div>
   );
 }
@@ -105,7 +89,7 @@ function getRecommendationBadge(recommendation: AnalysisResult["analysis"]["reco
   }
 }
 
-async function AnalysisContent({ username, isSignedIn }: { username: string; isSignedIn: boolean }) {
+async function AnalysisContent({ username, user }: { username: string; user: User | null }) {
   let result: AnalysisResult;
 
   try {
@@ -121,40 +105,16 @@ async function AnalysisContent({ username, isSignedIn }: { username: string; isS
   const badge = getRecommendationBadge(analysis.recommendation);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="fixed inset-0 grid-bg" />
-      <div className="fixed inset-0 noise-overlay pointer-events-none" />
+    <AppLayout user={user}>
+    <div className="flex-1 bg-background overflow-auto">
+      <div className="absolute inset-0 grid-bg" />
+      <div className="absolute inset-0 noise-overlay pointer-events-none" />
 
       {/* Background orbs */}
-      <div className="fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-emerald-600/10 blur-3xl" />
-      <div className="fixed bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-3xl" />
-
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
-            <div className="relative">
-              <BarChart3 className="h-6 w-6 text-emerald-400 transition-transform group-hover:scale-110" />
-            </div>
-            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-              Git Radar
-            </span>
-          </Link>
-          <div className="hidden md:block w-96">
-            <SearchForm isSignedIn={isSignedIn} />
-          </div>
-        </div>
-      </header>
+      <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-emerald-600/10 blur-3xl" />
+      <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-3xl" />
 
       <main className="relative z-10 container mx-auto px-4 md:px-6 py-8">
-        {/* Back button */}
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-muted-foreground hover:text-white transition-colors mb-6"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to search
-        </Link>
 
         {/* Profile Header */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur-xl p-6 md:p-8 mb-6">
@@ -438,7 +398,7 @@ async function AnalysisContent({ username, isSignedIn }: { username: string; isS
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/5 py-8 mt-12">
+      <footer className="relative z-10 border-t border-white/5 py-8 mt-12">
         <div className="container mx-auto px-4 md:px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -451,6 +411,7 @@ async function AnalysisContent({ username, isSignedIn }: { username: string; isS
         </div>
       </footer>
     </div>
+    </AppLayout>
   );
 }
 
@@ -460,7 +421,7 @@ export default async function AnalyzePage({ params }: PageProps) {
 
   return (
     <Suspense fallback={<AnalysisSkeleton />}>
-      <AnalysisContent username={decodeURIComponent(username)} isSignedIn={!!user} />
+      <AnalysisContent username={decodeURIComponent(username)} user={user} />
     </Suspense>
   );
 }
