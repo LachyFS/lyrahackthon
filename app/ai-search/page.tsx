@@ -29,7 +29,7 @@ import {
   Link as LinkIcon,
 } from "lucide-react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
-import { SiteHeader } from "@/components/site-header";
+import { AppLayout } from "@/components/app-layout";
 import { GitRadarLogoWave, GitRoastLogo } from "@/components/gitradar-logo";
 import Link from "next/link";
 import { DefaultChatTransport } from "ai";
@@ -886,31 +886,20 @@ function AISearchContent() {
   };
 
   return (
-    <div className={`relative h-screen flex flex-col overflow-hidden transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
+    <AppLayout user={user}>
+    <div className={`relative flex-1 flex flex-col overflow-hidden transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
       {/* Background effects */}
-      <div className="fixed inset-0 grid-bg" />
-      <div className="fixed inset-0 noise-overlay pointer-events-none" />
+      <div className="absolute inset-0 grid-bg" />
+      <div className="absolute inset-0 noise-overlay pointer-events-none" />
 
       {/* Roast mode flame gradient from bottom */}
       {roastMode && (
-        <div className="fixed inset-0 bg-gradient-to-t from-red-950/40 via-orange-950/20 via-40% to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-red-950/40 via-orange-950/20 via-40% to-transparent pointer-events-none" />
       )}
 
       {/* Animated gradient orbs */}
-      <div className={`fixed top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'opacity-0' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
-      <div className={`fixed top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'opacity-0' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
-
-      {/* Header */}
-      <SiteHeader
-        navLinks={[
-          { href: "/", label: "Home" },
-          { href: "/ai-search", label: "AI Chat" },
-          { href: "/ai-search?roast=true", label: "Roast" },
-        ]}
-        showSignIn
-        user={user}
-        roastMode={roastMode}
-      />
+      <div className={`absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'opacity-0' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
+      <div className={`absolute top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'opacity-0' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
 
       {/* Main Chat Area */}
       <main className="relative z-10 flex-1 flex flex-col min-h-0">
@@ -1316,6 +1305,7 @@ function AISearchContent() {
         </div>
       )}
     </div>
+    </AppLayout>
   );
 }
 
