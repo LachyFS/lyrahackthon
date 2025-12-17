@@ -19,6 +19,7 @@ import {
   Briefcase,
 } from "lucide-react";
 import type { AnalysisResult } from "@/lib/actions/github-analyze";
+import { useProfileAnalysis } from "@/hooks/use-queries";
 
 // LinkedIn icon
 const LinkedInIcon = ({ className }: { className?: string }) => (
@@ -158,27 +159,17 @@ function getRecommendationBadge(recommendation: string) {
 
 export function ExpandableProfileCard({ candidate }: ExpandableProfileCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleToggle = async () => {
-    if (!isExpanded && !analysisData && !isLoading) {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response = await fetch(`/api/analyze/${candidate.username}`);
-        if (!response.ok) {
-          throw new Error("Failed to fetch analysis");
-        }
-        const data = await response.json();
-        setAnalysisData(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load analysis");
-      } finally {
-        setIsLoading(false);
-      }
-    }
+  // Use React Query for profile analysis - only fetch when expanded
+  const {
+    data: analysisData,
+    isLoading,
+    error,
+  } = useProfileAnalysis(candidate.username, {
+    enabled: isExpanded, // Only fetch when card is expanded
+  });
+
+  const handleToggle = () => {
     setIsExpanded(!isExpanded);
   };
 
@@ -264,7 +255,9 @@ export function ExpandableProfileCard({ candidate }: ExpandableProfileCardProps)
           {isLoading ? (
             <AnalysisSkeleton />
           ) : error ? (
-            <div className="p-4 text-center text-red-400 text-sm">{error}</div>
+            <div className="p-4 text-center text-red-400 text-sm">
+              {error instanceof Error ? error.message : "Failed to load analysis"}
+            </div>
           ) : analysisData ? (
             <div className="p-4 space-y-4">
               {/* Score and Recommendation */}

@@ -23,6 +23,28 @@ export async function invalidateCache(key: string): Promise<void> {
   await redis.del(key);
 }
 
+// Invalidate all cache entries matching a pattern (prefix-based)
+export async function invalidateCachePattern(pattern: string): Promise<void> {
+  try {
+    // Use scan to find all keys matching the pattern
+    let cursor = "0";
+    const keysToDelete: string[] = [];
+
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, { match: pattern, count: 100 }) as [string, string[]];
+      cursor = nextCursor;
+      keysToDelete.push(...keys);
+    } while (cursor !== "0");
+
+    // Delete all matching keys
+    if (keysToDelete.length > 0) {
+      await Promise.all(keysToDelete.map(key => redis.del(key)));
+    }
+  } catch (error) {
+    console.error("Failed to invalidate cache pattern:", error);
+  }
+}
+
 // Rate limiting for AI generation endpoints
 export interface RateLimitResult {
   success: boolean;

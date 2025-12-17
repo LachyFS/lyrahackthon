@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeGitHubProfile } from "@/lib/actions/github-analyze";
 import { createClient } from "@/lib/supabase/server";
-import { checkRateLimit } from "@/lib/redis";
+import { checkRateLimit, getCached, setCache } from "@/lib/redis";
 import { checkBotId } from "botid/server";
+
+// Cache TTL: 10 minutes for profile analysis results
+const ANALYSIS_CACHE_TTL = 10 * 60;
 
 export async function GET(
   request: NextRequest,
@@ -28,6 +31,26 @@ export async function GET(
     );
   }
 
+  const { username } = await params;
+  const decodedUsername = decodeURIComponent(username).toLowerCase();
+  const cacheKey = `analysis:${decodedUsername}`;
+
+  // Check cache first
+  try {
+    const cached = await getCached<ReturnType<typeof analyzeGitHubProfile>>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, {
+        headers: {
+          "X-Cache": "HIT",
+          "Cache-Control": "public, max-age=600, stale-while-revalidate=300",
+        },
+      });
+    }
+  } catch (cacheError) {
+    // Log but continue if cache fails
+    console.error("Cache read error:", cacheError);
+  }
+
   // Rate limiting: 15 requests per minute per user (more restrictive due to expensive AI analysis)
   const rateLimit = await checkRateLimit(`ai:analyze:${user.id}`, 15, 60);
   if (!rateLimit.success) {
@@ -51,11 +74,22 @@ export async function GET(
     );
   }
 
-  const { username } = await params;
-
   try {
-    const result = await analyzeGitHubProfile(decodeURIComponent(username));
-    return NextResponse.json(result);
+    const result = await analyzeGitHubProfile(decodedUsername);
+
+    // Cache the successful result
+    try {
+      await setCache(cacheKey, result, ANALYSIS_CACHE_TTL);
+    } catch (cacheError) {
+      console.error("Cache write error:", cacheError);
+    }
+
+    return NextResponse.json(result, {
+      headers: {
+        "X-Cache": "MISS",
+        "Cache-Control": "public, max-age=600, stale-while-revalidate=300",
+      },
+    });
   } catch (error) {
     if (error instanceof Error && error.message === "User not found") {
       return NextResponse.json({ error: "User not found" }, { status: 404 });

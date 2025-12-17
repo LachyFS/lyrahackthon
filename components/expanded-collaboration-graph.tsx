@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Node,
@@ -22,7 +22,8 @@ import * as d3 from "d3";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2, Star, GitFork } from "lucide-react";
-import { fetchUserCollaboration, type CollaborationData, type GitHubProfile } from "@/lib/actions/github-analyze";
+import { type CollaborationData, type GitHubProfile } from "@/lib/actions/github-analyze";
+import { useUserCollaboration, usePrefetchUserCollaboration } from "@/hooks/use-queries";
 
 interface ExpandedCollaborationGraphProps {
   profile: GitHubProfile;
@@ -646,33 +647,56 @@ function CollaborationGraphInner({
 
 // Exported wrapper component with ReactFlowProvider and state management
 export function ExpandedCollaborationGraph({ profile, collaboration, fullscreen = false }: ExpandedCollaborationGraphProps) {
-  const [isPending, startTransition] = useTransition();
-
-  // Navigation state
-  const [currentUser, setCurrentUser] = useState<UserState>({ profile, collaboration });
+  // Navigation state - track which username we want to show
+  const [targetUsername, setTargetUsername] = useState<string | null>(null);
   const [history, setHistory] = useState<UserState[]>([]);
 
+  // Use React Query to fetch user collaboration data
+  const { data: fetchedUser, isLoading: isPending } = useUserCollaboration(
+    targetUsername || "",
+    { enabled: !!targetUsername }
+  );
+
+  // Prefetch hook for hover-based prefetching
+  const prefetchCollaboration = usePrefetchUserCollaboration();
+
+  // Current user state - either fetched data or initial props
+  const currentUser = useMemo<UserState>(() => {
+    if (fetchedUser && targetUsername) {
+      return fetchedUser;
+    }
+    return { profile, collaboration };
+  }, [fetchedUser, targetUsername, profile, collaboration]);
+
   const handleNavigateToUser = useCallback((username: string) => {
-    startTransition(async () => {
-      try {
-        const data = await fetchUserCollaboration(username);
-        // Save current state to history
-        setHistory(prev => [...prev, currentUser]);
-        // Navigate to new user
-        setCurrentUser(data);
-      } catch (error) {
-        console.error("Failed to fetch user collaboration:", error);
-      }
-    });
+    // Don't navigate if it's a repo node
+    if (username.startsWith('repo:')) return;
+
+    // Save current state to history before navigating
+    setHistory(prev => [...prev, currentUser]);
+    // Set target username to trigger React Query fetch
+    setTargetUsername(username);
   }, [currentUser]);
 
   const handleGoBack = useCallback(() => {
     if (history.length > 0) {
       const previousUser = history[history.length - 1];
       setHistory(prev => prev.slice(0, -1));
-      setCurrentUser(previousUser);
+      // Clear target username if going back to initial user
+      if (history.length === 1) {
+        setTargetUsername(null);
+      } else {
+        setTargetUsername(previousUser.profile.login);
+      }
     }
   }, [history]);
+
+  // Prefetch on hover (optional enhancement)
+  const handleNodeHover = useCallback((username: string) => {
+    if (!username.startsWith('repo:')) {
+      prefetchCollaboration(username);
+    }
+  }, [prefetchCollaboration]);
 
   if (currentUser.collaboration.collaborators.length === 0) {
     return (

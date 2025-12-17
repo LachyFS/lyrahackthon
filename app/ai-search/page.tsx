@@ -41,6 +41,7 @@ import { EmailDraft } from "@/components/email-draft";
 import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress } from "@/components/repo-analysis-card";
 import { motion, AnimatePresence } from "framer-motion";
 import type { RepoAnalysis, AnalysisProgress } from "@/lib/actions/repo-analyze";
+import { useSearchHistory, useGitHubUserSearch } from "@/hooks/use-queries";
 
 // Types for message parts
 interface TextPart {
@@ -185,20 +186,23 @@ function AISearchContent() {
   const hasSubmittedInitialRef = useRef(false);
   const [inputValue, setInputValue] = useState("");
   const [debugMessageId, setDebugMessageId] = useState<string | null>(null);
-  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
-  const [loadingRecent, setLoadingRecent] = useState(true);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const roastMode = searchParams.get("roast") === "true";
   const isDev = process.env.NODE_ENV === "development";
 
   // Autocomplete state
-  const [suggestions, setSuggestions] = useState<GitHubUserSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [mentionQuery, setMentionQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // React Query hooks for data fetching
+  const { data: recentSearches = [], isLoading: loadingRecent } = useSearchHistory(8);
+  const { data: suggestions = [] } = useGitHubUserSearch(mentionQuery, {
+    enabled: showSuggestions && mentionQuery.length >= 2,
+  });
 
   // Fetch user on mount
   useEffect(() => {
@@ -206,24 +210,6 @@ function AISearchContent() {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
     });
-  }, []);
-
-  // Fetch recent searches on mount
-  useEffect(() => {
-    async function fetchRecentSearches() {
-      try {
-        const res = await fetch("/api/search-history?limit=8");
-        if (res.ok) {
-          const data = await res.json();
-          setRecentSearches(data.searches || []);
-        }
-      } catch (error) {
-        console.error("Failed to fetch recent searches:", error);
-      } finally {
-        setLoadingRecent(false);
-      }
-    }
-    fetchRecentSearches();
   }, []);
 
   const { messages, status, sendMessage } = useChat({
@@ -251,25 +237,6 @@ function AISearchContent() {
 
   const isLoading = status === "streaming" || status === "submitted";
 
-  // Search GitHub users for autocomplete
-  const searchGitHubUsers = useCallback(async (query: string) => {
-    if (query.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    try {
-      const res = await fetch(`/api/github/search-users?q=${encodeURIComponent(query)}&limit=5`);
-      if (res.ok) {
-        const data = await res.json();
-        setSuggestions(data.users || []);
-        setSelectedSuggestionIndex(0);
-      }
-    } catch (error) {
-      console.error("Failed to search GitHub users:", error);
-      setSuggestions([]);
-    }
-  }, []);
-
   // Handle input change with @ mention detection
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -285,18 +252,14 @@ function AISearchContent() {
       setMentionStart(start);
       const query = mentionMatch[1];
 
-      // Debounce the search
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-      debounceRef.current = setTimeout(() => {
-        searchGitHubUsers(query);
-        setShowSuggestions(true);
-      }, 200);
+      // Update mention query for React Query to fetch suggestions
+      setMentionQuery(query);
+      setShowSuggestions(true);
+      setSelectedSuggestionIndex(0);
     } else {
       setShowSuggestions(false);
       setMentionStart(null);
-      setSuggestions([]);
+      setMentionQuery("");
     }
   };
 
@@ -312,7 +275,7 @@ function AISearchContent() {
 
     setInputValue(newValue);
     setShowSuggestions(false);
-    setSuggestions([]);
+    setMentionQuery("");
     setMentionStart(null);
     inputRef.current?.focus();
   };
