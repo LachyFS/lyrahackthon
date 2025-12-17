@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/src/db";
 import { searchHistory } from "@/src/db/schema";
 import { analyzeRepositoryWithProgress, quickRepoCheck, type AnalysisProgress } from "@/lib/actions/repo-analyze";
+import { searchWithProgress, type SearchProgress } from "@/lib/actions/search-agent";
 import { checkRateLimit } from "@/lib/redis";
 import { checkBotId } from "botid/server";
 
@@ -851,12 +852,20 @@ You have access to these tools:
    - NOTE: This takes 1-3 minutes to run as it performs deep analysis.
 
 **General web tools:**
-6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+6. **webSearch**: Quick web search for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Use for simple, fast searches.
 
 7. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
+8. **deepWebSearch**: Multi-step deep web search with AI analysis. Use this for thorough research that requires:
+   - Scraping multiple pages
+   - AI-synthesized summaries
+   - Key themes and entity extraction
+   - Follow-up suggestions
+   Search types: general, github_profiles, linkedin, portfolio, news, technical.
+   NOTE: Takes 30-60 seconds but provides comprehensive analysis.
+
 **Outreach tools:**
-8. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
+9. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
@@ -1091,6 +1100,73 @@ NOTE: This analysis takes 1-3 minutes as it runs in a sandboxed environment.`,
             const errorMsg = `Analysis failed: ${error instanceof Error ? error.message : String(error)}`;
             yield { status: 'error' as const, message: errorMsg, error: errorMsg };
             return { error: errorMsg, repoUrl };
+          }
+        },
+      }),
+      deepWebSearch: tool({
+        description: `Perform a multi-step deep web search with AI-powered analysis. This tool:
+1. Searches the web using multiple strategies
+2. Scrapes and extracts content from each result
+3. Uses AI to analyze and synthesize findings
+4. Provides a comprehensive summary with key themes, entities, and insights
+
+Use this instead of the basic webSearch tool when you need:
+- Thorough research on a topic
+- Analysis of multiple sources
+- Extraction of key themes and entities
+- AI-synthesized summaries
+- Follow-up suggestions
+
+Search types available:
+- general: General web search (default)
+- github_profiles: Search GitHub profiles only
+- linkedin: Search LinkedIn profiles
+- portfolio: Search personal websites/portfolios (excludes social media)
+- news: Search news articles
+- technical: Search technical content (StackOverflow, dev.to, etc.)
+
+NOTE: This search takes 30-60 seconds as it scrapes and analyzes multiple pages.`,
+        inputSchema: z.object({
+          query: z.string().describe("The search query to research"),
+          searchType: z.enum(["general", "github_profiles", "linkedin", "portfolio", "news", "technical"]).optional().describe("Type of search to perform (default: general)"),
+          maxResults: z.number().optional().describe("Maximum number of results to analyze (default: 10, max: 15)"),
+          includeDomains: z.array(z.string()).optional().describe("Only search these domains"),
+          excludeDomains: z.array(z.string()).optional().describe("Exclude these domains from search"),
+          context: z.string().optional().describe("Additional context to help the AI understand the search intent"),
+        }),
+        // Generator function for streaming progress updates to UI
+        async *execute({ query, searchType, maxResults, includeDomains, excludeDomains, context }): AsyncGenerator<SearchProgress, import("@/lib/actions/search-agent").SearchAnalysis | { error: string; query: string }> {
+          // Stream progress from the search generator
+          try {
+            let lastProgress: SearchProgress | undefined;
+
+            for await (const progress of searchWithProgress({
+              query,
+              searchType: searchType || "general",
+              maxResults: Math.min(maxResults || 10, 15),
+              includeDomains,
+              excludeDomains,
+              context,
+            })) {
+              lastProgress = progress;
+              yield progress;
+            }
+
+            // Return the final result
+            if (lastProgress?.status === 'complete' && lastProgress.result) {
+              return lastProgress.result;
+            }
+
+            if (lastProgress?.status === 'error') {
+              return { error: lastProgress.error || lastProgress.message, query };
+            }
+
+            return { error: 'Search failed: No result returned', query };
+
+          } catch (error) {
+            const errorMsg = `Search failed: ${error instanceof Error ? error.message : String(error)}`;
+            yield { status: 'error' as const, message: errorMsg, error: errorMsg, query };
+            return { error: errorMsg, query };
           }
         },
       }),
