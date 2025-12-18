@@ -61,8 +61,8 @@ export function AppSidebar({ user }: AppSidebarProps) {
 
   return (
     <Sidebar className="border-r border-white/5">
-      <SidebarHeader className="p-4">
-        <Link href="/" className="flex items-center gap-2 font-bold text-lg group">
+      <SidebarHeader className="px-4 py-4">
+        <Link href="/" className="inline-flex items-center gap-2 font-bold text-lg group w-fit">
           <div className="relative">
             {roastMode ? (
               <GitRoastLogo className="h-7 w-7 transition-transform group-hover:scale-110" />
@@ -91,7 +91,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navigationItems.map((item) => (
