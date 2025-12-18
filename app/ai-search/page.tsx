@@ -39,9 +39,11 @@ import { User as SupabaseUser } from "@supabase/supabase-js";
 import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 import { EmailDraft } from "@/components/email-draft";
 import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress } from "@/components/repo-analysis-card";
+import { SearchAgentCard, SearchAgentError, SearchAgentSkeleton, SearchAgentProgress } from "@/components/search-agent-card";
 import { motion, AnimatePresence } from "framer-motion";
 import type { RepoAnalysis, AnalysisProgress } from "@/lib/actions/repo-analyze";
 import { useSearchHistory, useGitHubUserSearch } from "@/hooks/use-queries";
+import type { SearchAnalysis, SearchProgress } from "@/lib/actions/search-agent";
 
 // Types for message parts
 interface TextPart {
@@ -153,6 +155,8 @@ function CollapsibleToolResult({
         return "Web Search Results";
       case "scrapeUrls":
         return "Scraped Content";
+      case "deepWebSearch":
+        return "Deep Search Analysis";
       default:
         return "Tool Result";
     }
@@ -845,6 +849,43 @@ function AISearchContent() {
       );
     }
 
+    if (toolName === "deepWebSearch") {
+      // The result can be either:
+      // 1. A SearchProgress object (with status, result, etc.) - this is what the streaming returns
+      // 2. A direct SearchAnalysis object
+      // 3. An error object
+      const data = result as SearchProgress | SearchAnalysis | { error: string; query: string };
+
+      // Check if it's an error response
+      if ("error" in data && data.error && !("status" in data)) {
+        return <SearchAgentError error={data.error} query={(data as { error: string; query: string }).query || ""} />;
+      }
+
+      // Check if it's a SearchProgress wrapper (has status and result fields)
+      if ("status" in data && "result" in data) {
+        const progressData = data as SearchProgress;
+
+        // If there's an error in the progress
+        if (progressData.status === "error") {
+          return <SearchAgentError
+            error={progressData.error || progressData.message}
+            query={progressData.query || ""}
+          />;
+        }
+
+        // Extract the actual SearchAnalysis from the result
+        if (progressData.result) {
+          return <SearchAgentCard analysis={progressData.result} />;
+        }
+
+        // Fallback: show skeleton if result is missing
+        return <SearchAgentSkeleton />;
+      }
+
+      // It's a direct SearchAnalysis object
+      return <SearchAgentCard analysis={data as SearchAnalysis} />;
+    }
+
     return null;
   };
 
@@ -1029,22 +1070,30 @@ function AISearchContent() {
                         const hasResult = toolPart.state === "result" || toolPart.state === "output-available";
                         const toolResult = toolPart.output ?? toolPart.result;
 
-                        // For analyzeGitHubRepository, check preliminary FIRST before hasResult
-                        const isPreliminary = toolName === "analyzeGitHubRepository" && toolPart.preliminary;
+                        // For analyzeGitHubRepository and deepWebSearch, check preliminary FIRST before hasResult
+                        const isPreliminaryRepo = toolName === "analyzeGitHubRepository" && toolPart.preliminary;
+                        const isPreliminarySearch = toolName === "deepWebSearch" && toolPart.preliminary;
+                        const isPreliminary = isPreliminaryRepo || isPreliminarySearch;
                         const showFinalResult = hasResult && !isPreliminary;
 
                         return (
                           <div key={`tool-${i}`} className="space-y-2">
-                            {isPreliminary && toolResult ? (
+                            {isPreliminaryRepo && toolResult ? (
                               // Show streaming progress for repo analysis
                               <RepoAnalysisProgress progress={toolResult as AnalysisProgress} />
+                            ) : isPreliminarySearch && toolResult ? (
+                              // Show streaming progress for deep web search
+                              <SearchAgentProgress progress={toolResult as SearchProgress} />
                             ) : showFinalResult ? (
-                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile"}>
+                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch"}>
                                 {toolResult != null && renderToolResult(toolName, toolResult)}
                               </CollapsibleToolResult>
                             ) : toolName === "analyzeGitHubRepository" ? (
                               // Fallback skeleton for repo analysis
                               <RepoAnalysisSkeleton />
+                            ) : toolName === "deepWebSearch" ? (
+                              // Fallback skeleton for deep web search
+                              <SearchAgentSkeleton />
                             ) : (
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <Loader2 className="h-3 w-3 animate-spin" />
