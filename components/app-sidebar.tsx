@@ -87,7 +87,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
         </Link>
       </SidebarHeader>
 
-      <SidebarSeparator />
+      <SidebarSeparator className="mx-4" />
 
       <SidebarContent>
         <SidebarGroup>
@@ -133,7 +133,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
         )}
       </SidebarContent>
 
-      <SidebarSeparator />
+      <SidebarSeparator className="mx-4" />
 
       <SidebarFooter className="p-4">
         {user ? (
