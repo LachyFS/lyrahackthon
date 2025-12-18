@@ -14,7 +14,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { GitRadarLogoWave, GitRoastLogo } from "@/components/gitradar-logo";
 import { Button } from "@/components/ui/button";
@@ -61,20 +60,13 @@ export function AppSidebar({ user }: AppSidebarProps) {
 
   return (
     <Sidebar className="border-r border-white/5">
-      <SidebarHeader className="px-4 py-4">
-        <Link href="/" className="inline-flex items-center gap-2 font-bold text-lg group w-fit">
-          <div className="relative">
-            {roastMode ? (
-              <GitRoastLogo className="h-7 w-7 transition-transform group-hover:scale-110" />
-            ) : (
-              <GitRadarLogoWave className="h-7 w-7 transition-transform group-hover:scale-110" />
-            )}
-            <div
-              className={`absolute inset-0 blur-lg opacity-0 group-hover:opacity-100 transition-opacity ${
-                roastMode ? "bg-red-500/50" : "bg-emerald-400/50"
-              }`}
-            />
-          </div>
+      <SidebarHeader className="px-4 py-4 border-b border-white/5">
+        <Link href="/" className="inline-flex items-center gap-2 font-bold text-lg w-fit">
+          {roastMode ? (
+            <GitRoastLogo className="h-7 w-7" />
+          ) : (
+            <GitRadarLogoWave className="h-7 w-7" />
+          )}
           <span
             className={`bg-clip-text text-transparent ${
               roastMode
@@ -86,8 +78,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </span>
         </Link>
       </SidebarHeader>
-
-      <SidebarSeparator className="mx-4" />
 
       <SidebarContent>
         <SidebarGroup>
@@ -112,9 +102,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
         </SidebarGroup>
 
         {pathname.startsWith("/analyze/") && (
-          <>
-            <SidebarSeparator />
-            <SidebarGroup>
+          <SidebarGroup>
               <SidebarGroupLabel>Profile Analysis</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
@@ -128,14 +116,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
                   </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
-            </SidebarGroup>
-          </>
+          </SidebarGroup>
         )}
       </SidebarContent>
 
-      <SidebarSeparator className="mx-4" />
-
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="p-4 border-t border-white/5">
         {user ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3 px-2">
