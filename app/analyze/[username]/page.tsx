@@ -34,15 +34,17 @@ interface PageProps {
 
 function AnalysisSkeleton() {
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="absolute inset-0 grid-bg" />
-      <div className="absolute inset-0 noise-overlay pointer-events-none" />
-      <div className="relative z-10 flex flex-col items-center justify-center gap-4">
-        <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
-        <p className="text-lg text-muted-foreground">Analyzing GitHub profile...</p>
-        <p className="text-sm text-muted-foreground">This may take a few seconds</p>
+    <AppLayout>
+      <div className="flex-1 bg-background overflow-auto">
+        <div className="absolute inset-0 grid-bg" />
+        <div className="absolute inset-0 noise-overlay pointer-events-none" />
+        <div className="relative z-10 flex flex-col items-center justify-center min-h-[80vh] gap-4">
+          <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
+          <p className="text-lg text-muted-foreground">Analyzing GitHub profile...</p>
+          <p className="text-sm text-muted-foreground">This may take a few seconds</p>
+        </div>
       </div>
-    </div>
+    </AppLayout>
   );
 }
 
