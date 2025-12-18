@@ -19,7 +19,7 @@ function AppLayoutContent({ children, user }: AppLayoutProps) {
   return (
     <SidebarProvider>
       <AppSidebar user={user} />
-      <SidebarInset className="flex flex-col min-h-screen">
+      <SidebarInset className="flex flex-col h-screen max-h-screen overflow-hidden">
         {/* Mobile header with sidebar trigger */}
         <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b border-white/5 bg-background/80 backdrop-blur-xl px-4 md:hidden">
           <SidebarTrigger />

@@ -403,7 +403,7 @@ export function SearchAgentProgress({ progress }: { progress: SearchProgress }) 
             </div>
           </div>
           {progress.scrapedContent && (
-            <div className="mt-2 p-2 rounded bg-black/40 max-h-20 overflow-auto">
+            <div className="mt-2 p-2 rounded bg-black/40 max-h-24 overflow-auto">
               <pre className="text-xs text-white/60 font-mono whitespace-pre-wrap break-all">
                 {progress.scrapedContent.slice(0, 300)}
                 {progress.scrapedContent.length > 300 && '...'}

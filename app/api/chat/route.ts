@@ -7,11 +7,8 @@ import { db } from "@/src/db";
 import { searchHistory } from "@/src/db/schema";
 import {
   analyzeRepositoryWithProgress,
-  analyzeMultipleRepositoriesWithProgress,
   quickRepoCheck,
   type AnalysisProgress,
-  type ParallelAnalysisProgress,
-  type RepoAnalysis
 } from "@/lib/actions/repo-analyze";
 import { searchWithProgress, type SearchProgress } from "@/lib/actions/search-agent";
 import { checkRateLimit } from "@/lib/redis";
@@ -858,17 +855,10 @@ You have access to these tools:
    - Assessing technical professionalism of a candidate's work
    - NOTE: This takes 1-3 minutes to run as it performs deep analysis.
 
-6. **analyzeGitHubRepositories**: Analyze MULTIPLE repositories in parallel. Much more efficient than analyzing repos one by one. Use this when:
-   - A user provides multiple repo URLs to analyze at once
-   - You want to compare code quality across several repositories
-   - Evaluating multiple projects from the same developer
-   - Assessing a candidate's full portfolio
-   - NOTE: Analyzes up to 3 repos concurrently by default (max 5). Total time is faster than sequential analysis.
-
 **General web tools:**
-7. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
 
-8. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
+7. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
 8. **deepWebSearch**: Multi-step deep web search with AI analysis. Use this for thorough research that requires:
    - Scraping multiple pages
@@ -1114,116 +1104,6 @@ NOTE: This analysis takes 1-3 minutes as it runs in a sandboxed environment.`,
             const errorMsg = `Analysis failed: ${error instanceof Error ? error.message : String(error)}`;
             yield { status: 'error' as const, message: errorMsg, error: errorMsg };
             return { error: errorMsg, repoUrl };
-          }
-        },
-      }),
-      analyzeGitHubRepositories: tool({
-        description: `Analyze multiple GitHub repositories in parallel. This is more efficient than analyzing repos one by one.
-
-Use this when:
-- A user provides multiple repo URLs to analyze
-- You want to compare code quality across multiple repositories
-- Evaluating multiple projects from the same developer
-- Assessing a candidate's portfolio with several repos
-
-This tool:
-- Analyzes up to 5 repos concurrently (configurable)
-- Streams progress for all repos in real-time
-- Returns comprehensive analysis for each repo
-- Handles failures gracefully (one failing repo won't stop others)
-
-NOTE: Each repo analysis takes 1-3 minutes. Total time depends on concurrency and number of repos.`,
-        inputSchema: z.object({
-          repoUrls: z.array(z.string()).min(1).max(10).describe("Array of GitHub repository URLs to analyze, e.g. ['https://github.com/user/repo1', 'https://github.com/user/repo2']"),
-          hiringBrief: z.string().optional().describe("Optional context about what role/skills you're hiring for, to contextualize the analysis"),
-          concurrency: z.number().min(1).max(5).optional().describe("Maximum number of repos to analyze concurrently (default: 3, max: 5)"),
-        }),
-        async *execute({ repoUrls, hiringBrief, concurrency }): AsyncGenerator<ParallelAnalysisProgress, Array<{ repoUrl: string; repoName: string; repoOwner: string; result?: RepoAnalysis; error?: string }> | { error: string }> {
-          // Validate authentication first
-          const token = await getGitHubToken();
-          if (!token) {
-            const errorResult = { error: "Authentication required. Please sign in with GitHub." };
-            yield {
-              type: 'overall_update' as const,
-              message: errorResult.error,
-              repos: [],
-              completedCount: 0,
-              totalCount: repoUrls.length,
-            };
-            return errorResult;
-          }
-
-          // Validate repos exist before starting heavy analysis
-          yield {
-            type: 'overall_update' as const,
-            message: `Validating ${repoUrls.length} repositories...`,
-            repos: repoUrls.map(url => ({
-              repoUrl: url,
-              repoName: 'validating',
-              repoOwner: 'validating',
-              status: 'validating' as const,
-              message: 'Checking repository...',
-            })),
-            completedCount: 0,
-            totalCount: repoUrls.length,
-          };
-
-          const validUrls: string[] = [];
-          const invalidResults: Array<{ repoUrl: string; repoName: string; repoOwner: string; error: string }> = [];
-
-          for (const url of repoUrls) {
-            const check = await quickRepoCheck(url, token);
-            if (check.isValid && check.repoInfo) {
-              validUrls.push(url);
-            } else {
-              invalidResults.push({
-                repoUrl: url,
-                repoName: 'unknown',
-                repoOwner: 'unknown',
-                error: check.error || 'Invalid repository',
-              });
-            }
-          }
-
-          if (validUrls.length === 0) {
-            return {
-              error: `No valid repositories found. Errors: ${invalidResults.map(r => `${r.repoUrl}: ${r.error}`).join('; ')}`,
-            };
-          }
-
-          // Stream progress from the parallel analysis
-          try {
-            let lastProgress: ParallelAnalysisProgress | undefined;
-
-            for await (const progress of analyzeMultipleRepositoriesWithProgress({
-              repoUrls: validUrls,
-              hiringBrief,
-              timeout: "5m",
-              vcpus: 2,
-              concurrency: concurrency || 3,
-            })) {
-              lastProgress = progress;
-              yield progress;
-            }
-
-            // Combine results with invalid repos
-            if (lastProgress?.type === 'complete' && lastProgress.results) {
-              const allResults = [...lastProgress.results, ...invalidResults];
-              return allResults;
-            }
-
-            return { error: 'Parallel analysis failed: No results returned' };
-
-          } catch (error) {
-            const errorMsg = `Parallel analysis failed: ${error instanceof Error ? error.message : String(error)}`;
-            yield {
-              type: 'overall_update' as const,
-              message: errorMsg,
-              repos: [],
-              completedCount: 0,
-              totalCount: repoUrls.length,
-            };
-            return { error: errorMsg };
           }
         },
       }),

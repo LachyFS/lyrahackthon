@@ -118,24 +118,23 @@ function CollapsibleToolResult({
   toolName,
   children,
   autoCollapse = true,
+  hasFollowingTool = false,
 }: {
   toolName: string;
   children: React.ReactNode;
   autoCollapse?: boolean;
+  hasFollowingTool?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
   const hasAutoCollapsed = useRef(false);
 
-  // Auto-collapse after 2 seconds (unless disabled)
+  // Auto-collapse when there's a following tool (takes priority over time-based)
   useEffect(() => {
-    if (autoCollapse && !hasAutoCollapsed.current) {
-      const timer = setTimeout(() => {
-        setIsExpanded(false);
-        hasAutoCollapsed.current = true;
-      }, 2000);
-      return () => clearTimeout(timer);
+    if (autoCollapse && hasFollowingTool && !hasAutoCollapsed.current) {
+      setIsExpanded(false);
+      hasAutoCollapsed.current = true;
     }
-  }, [autoCollapse]);
+  }, [autoCollapse, hasFollowingTool]);
 
   const getToolLabel = (name: string) => {
     switch (name) {
@@ -943,7 +942,7 @@ function AISearchContent() {
 
   return (
     <AppLayout user={user}>
-    <div className={`relative flex-1 flex flex-col overflow-hidden transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
+    <div className={`relative flex-1 flex flex-col overflow-hidden min-h-0 transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
       {/* Background effects */}
       <div className="absolute inset-0 grid-bg" />
       <div className="absolute inset-0 noise-overlay pointer-events-none" />
@@ -960,8 +959,8 @@ function AISearchContent() {
       {/* Main Chat Area */}
       <main className="relative z-10 flex-1 flex flex-col min-h-0">
         {/* Messages */}
-        <StickToBottom className="flex-1 relative mb-4 overflow-auto" resize="smooth" initial="smooth">
-          <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent container mx-auto px-4 md:px-6 pt-8 max-w-4xl">
+        <StickToBottom className="flex-1 relative overflow-auto" resize="smooth" initial="smooth">
+          <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent container mx-auto px-4 md:px-6 pt-8 pb-8 max-w-4xl">
           {messages.length === 0 && (
             <div className="text-center py-16">
               <motion.div
@@ -1037,39 +1036,39 @@ function AISearchContent() {
                     <span>Recently Viewed Profiles</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {recentSearches.map((search, index) => (
-                      <motion.div
-                        key={search.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.3, delay: 0.8 + index * 0.05 }}
-                      >
-                        <Link
-                          href={`/analyze/${search.githubUsername}`}
-                          className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                    {recentSearches.slice(0, 4).map((search, index) => (
+                        <motion.div
+                          key={search.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3, delay: 0.8 + index * 0.05 }}
                         >
-                          <img
-                            src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
-                            alt={search.githubUsername}
-                            className="w-10 h-10 rounded-full border border-white/20"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-white truncate">
-                                {search.githubName || search.githubUsername}
-                              </span>
-                              <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
-                            <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
-                            {search.githubLocation && (
-                              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                                <MapPin className="h-3 w-3" />
-                                <span className="truncate">{search.githubLocation}</span>
+                          <Link
+                            href={`/analyze/${search.githubUsername}`}
+                            className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                          >
+                            <img
+                              src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
+                              alt={search.githubUsername}
+                              className="w-10 h-10 rounded-full border border-white/20"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-white truncate">
+                                  {search.githubName || search.githubUsername}
+                                </span>
+                                <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                               </div>
-                            )}
-                          </div>
-                        </Link>
-                      </motion.div>
+                              <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
+                              {search.githubLocation && (
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                                  <MapPin className="h-3 w-3" />
+                                  <span className="truncate">{search.githubLocation}</span>
+                                </div>
+                              )}
+                            </div>
+                          </Link>
+                    </motion.div>
                     ))}
                   </div>
                 </motion.div>
@@ -1099,7 +1098,9 @@ function AISearchContent() {
                 ) : (
                   <>
                     {/* Render parts in original order */}
-                    {message.parts.map((part, i) => {
+                    {message.parts.map((part, i, allParts) => {
+                      // Check if there's a following tool part after this one
+                      const hasFollowingTool = allParts.slice(i + 1).some(p => p.type.startsWith("tool-"));
                       // Reasoning parts - only show while thinking
                       if (part.type === "reasoning") {
                         const reasoningPart = part as ReasoningPart;
@@ -1137,7 +1138,7 @@ function AISearchContent() {
                               // Show streaming progress for deep web search
                               <SearchAgentProgress progress={toolResult as SearchProgress} />
                             ) : showFinalResult ? (
-                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch"}>
+                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch"} hasFollowingTool={hasFollowingTool}>
                                 {toolResult != null && renderToolResult(toolName, toolResult)}
                               </CollapsibleToolResult>
                             ) : toolName === "analyzeGitHubRepository" ? (
@@ -1218,7 +1219,7 @@ function AISearchContent() {
                 )}
               </div>
               {/* Per-message debug button - Dev only */}
-              {/* {isDev && (
+              {isDev && (
                 <button
                   onClick={() => setDebugMessageId(debugMessageId === message.id ? null : message.id)}
                   className="flex-shrink-0 self-start p-1 rounded text-yellow-500/50 hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
@@ -1226,7 +1227,7 @@ function AISearchContent() {
                 >
                   <Bug className="h-3 w-3" />
                 </button>
-              )} */}
+              )}
             </motion.div>
           ))}
           </AnimatePresence>
@@ -1322,7 +1323,7 @@ function AISearchContent() {
             <Button
               type="submit"
               disabled={isLoading || !inputValue.trim()}
-              className={`h-12 px-6 transition-all duration-300 ${
+              className={`h-12 w-12 transition-all duration-300 ${
                 roastMode
                   ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400'
                   : 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500'

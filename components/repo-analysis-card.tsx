@@ -348,31 +348,6 @@ export function RepoAnalysisCard({ analysis }: RepoAnalysisCardProps) {
         </div>
       )}
 
-      {/* Raw Findings (Collapsible) */}
-      {analysis.rawFindings?.length > 0 && (
-        <div className="border-t border-white/10">
-          <button
-            onClick={() => setShowFindings(!showFindings)}
-            className="w-full px-4 py-3 flex items-center justify-between text-sm text-muted-foreground hover:text-white transition-colors"
-          >
-            <span>Analysis Details ({analysis.rawFindings.length} commands)</span>
-            <ChevronDown className={`h-4 w-4 transition-transform ${showFindings ? "rotate-180" : ""}`} />
-          </button>
-          {showFindings && (
-            <div className="px-4 pb-4 space-y-2 max-h-64 overflow-y-auto">
-              {analysis.rawFindings.map((finding, i) => (
-                <div key={i} className="p-2 rounded bg-white/5 text-xs">
-                  <div className="font-mono text-cyan-400 mb-1">{finding.command}</div>
-                  <div className="text-muted-foreground">{finding.purpose}</div>
-                  {finding.keyFindings && (
-                    <div className="mt-1 text-white/70 line-clamp-2">{finding.keyFindings}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -497,8 +472,8 @@ export function RepoAnalysisProgress({ progress }: { progress: AnalysisProgress 
         </div>
       </div>
 
-      {/* Command display for executing_command status */}
-      {progress.status === 'executing_command' && decodedCommand && (
+      {/* Command display */}
+      {(progress.status === 'executing_command' || progress.status === 'analyzing') && decodedCommand && (
         <div className="p-3 bg-black/30">
           <div className="flex items-start gap-2">
             <span className="text-emerald-400 font-mono text-xs mt-0.5">$</span>
@@ -514,10 +489,10 @@ export function RepoAnalysisProgress({ progress }: { progress: AnalysisProgress 
             </div>
           </div>
           {decodedOutput && (
-            <div className="mt-2 p-2 rounded bg-black/40 max-h-24 overflow-auto">
+            <div className="mt-2 p-2 rounded bg-black/40 max-h-32 overflow-auto">
               <pre className="text-xs text-white/60 font-mono whitespace-pre-wrap break-all">
-                {decodedOutput.slice(0, 300)}
-                {decodedOutput.length > 300 && '...'}
+                {decodedOutput.slice(0, 500)}
+                {decodedOutput.length > 500 && '...'}
               </pre>
             </div>
           )}
