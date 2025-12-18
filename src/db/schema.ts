@@ -43,6 +43,11 @@ export const profiles = devshowcase.table(
     headline: text("headline"),
     lookingForWork: boolean("looking_for_work").default(false),
     openToCollaborate: boolean("open_to_collaborate").default(false),
+    // GitHub OAuth tokens (encrypted)
+    // These are stored to enable token refresh without re-authentication
+    githubAccessToken: text("github_access_token"),
+    githubRefreshToken: text("github_refresh_token"),
+    githubTokenExpiresAt: timestamp("github_token_expires_at"),
     // Timestamps
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

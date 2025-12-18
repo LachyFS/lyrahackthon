@@ -27,6 +27,7 @@ import {
   Globe,
   FileText,
   Link as LinkIcon,
+  Paperclip,
 } from "lucide-react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { AppLayout } from "@/components/app-layout";
@@ -40,6 +41,8 @@ import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 import { EmailDraft } from "@/components/email-draft";
 import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress, ParallelRepoAnalysisProgress, ParallelRepoAnalysisResults } from "@/components/repo-analysis-card";
 import { SearchAgentCard, SearchAgentError, SearchAgentSkeleton, SearchAgentProgress } from "@/components/search-agent-card";
+import { LinkedInSearchResult, LinkedInProfileResult } from "@/components/linkedin-result-card";
+import { TextArtifact, TextArtifactPreview, LARGE_TEXT_THRESHOLD, detectTextType } from "@/components/text-artifact";
 import { motion, AnimatePresence } from "framer-motion";
 import type { RepoAnalysis, AnalysisProgress, ParallelAnalysisProgress } from "@/lib/actions/repo-analyze";
 import { useSearchHistory, useGitHubUserSearch } from "@/hooks/use-queries";
@@ -156,6 +159,10 @@ function CollapsibleToolResult({
         return "Scraped Content";
       case "deepWebSearch":
         return "Deep Search Analysis";
+      case "linkedinSearch":
+        return "LinkedIn Profiles";
+      case "linkedinProfile":
+        return "LinkedIn Profile";
       default:
         return "Tool Result";
     }
@@ -201,6 +208,14 @@ function AISearchContent() {
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
+  // Text artifact state for large pastes
+  interface TextArtifactData {
+    id: string;
+    content: string;
+    filename: string;
+  }
+  const [attachedArtifact, setAttachedArtifact] = useState<TextArtifactData | null>(null);
+
   // React Query hooks for data fetching
   const { data: recentSearches = [], isLoading: loadingRecent } = useSearchHistory(8);
   const { data: suggestions = [] } = useGitHubUserSearch(mentionQuery, {
@@ -230,12 +245,45 @@ function AISearchContent() {
     }
   }, [status, initialQuery, sendMessage]);
 
+  // Handle paste events for large text detection
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData("text");
+
+    // Check if pasted text is large enough to be an artifact
+    if (pastedText.length >= LARGE_TEXT_THRESHOLD) {
+      e.preventDefault();
+
+      const { suggestedFilename } = detectTextType(pastedText);
+
+      setAttachedArtifact({
+        id: crypto.randomUUID(),
+        content: pastedText,
+        filename: suggestedFilename,
+      });
+
+      // Don't set the input value, the artifact is attached instead
+    }
+    // Small pastes are handled normally by the browser
+  }, []);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim() || status !== "ready") return;
+    const hasContent = inputValue.trim() || attachedArtifact;
+    if (!hasContent || status !== "ready") return;
     setShowSuggestions(false);
-    sendMessage({ parts: [{ type: "text", text: inputValue }] });
+
+    // Build the message content
+    let messageText = inputValue.trim();
+
+    // If there's an artifact, include it in the message
+    if (attachedArtifact) {
+      const artifactSection = `\n\n<attached-file filename="${attachedArtifact.filename}">\n${attachedArtifact.content}\n</attached-file>`;
+      messageText = messageText ? `${messageText}${artifactSection}` : `Here's the content I'd like you to analyze:${artifactSection}`;
+    }
+
+    sendMessage({ parts: [{ type: "text", text: messageText }] });
     setInputValue("");
+    setAttachedArtifact(null);
   };
 
   const isLoading = status === "streaming" || status === "submitted";
@@ -614,6 +662,8 @@ function AISearchContent() {
               </div>
               <Link
                 href={`/analyze/${data.username}`}
+                target="_blank"
+                prefetch={true}
                 className="mt-3 inline-flex items-center gap-1 text-sm text-cyan-400 hover:text-cyan-300"
               >
                 View full analysis
@@ -937,6 +987,92 @@ function AISearchContent() {
       return <SearchAgentCard analysis={data as SearchAnalysis} />;
     }
 
+    if (toolName === "linkedinSearch") {
+      const data = result as {
+        searchParams?: {
+          searchQuery?: string;
+          currentJobTitles?: string[];
+          locations?: string[];
+          currentCompanies?: string[];
+        };
+        profiles: Array<{
+          name: string;
+          headline: string | null;
+          location: string | null;
+          profileUrl: string;
+          currentCompany: string | null;
+          currentRole: string | null;
+          about: string | null;
+          openToWork: boolean;
+          verified: boolean;
+          connectionCount: number | null;
+          topSkills: string | null;
+          experience: Array<{
+            title: string;
+            company: string;
+            duration: string | null;
+            isCurrent: boolean;
+          }>;
+          education: Array<{
+            school: string;
+            degree: string | null;
+            field: string | null;
+          }>;
+          skills: string[];
+        }>;
+        total: number;
+      };
+
+      return (
+        <LinkedInSearchResult
+          profiles={data.profiles}
+          searchParams={data.searchParams}
+          total={data.total}
+        />
+      );
+    }
+
+    if (toolName === "linkedinProfile") {
+      const data = result as {
+        name: string;
+        firstName?: string | null;
+        lastName?: string | null;
+        headline: string | null;
+        location: string | null;
+        profileUrl: string;
+        profileImage?: string | null;
+        currentCompany: string | null;
+        currentRole: string | null;
+        about: string | null;
+        openToWork: boolean;
+        verified: boolean;
+        hiring?: boolean;
+        premium?: boolean;
+        connectionCount: number | null;
+        followerCount?: number | null;
+        topSkills: string | null;
+        experience: Array<{
+          title: string;
+          company: string;
+          duration: string | null;
+          isCurrent: boolean;
+        }>;
+        education: Array<{
+          school: string;
+          degree: string | null;
+          field: string | null;
+        }>;
+        skills: string[];
+        certifications?: Array<{
+          name: string;
+          issuingOrganization: string | null;
+        }>;
+        languages?: string[];
+      };
+
+      return <LinkedInProfileResult profile={data} />;
+    }
+
     return null;
   };
 
@@ -1138,7 +1274,7 @@ function AISearchContent() {
                               // Show streaming progress for deep web search
                               <SearchAgentProgress progress={toolResult as SearchProgress} />
                             ) : showFinalResult ? (
-                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch"} hasFollowingTool={hasFollowingTool}>
+                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch" && toolName !== "linkedinSearch" && toolName !== "linkedinProfile"} hasFollowingTool={hasFollowingTool}>
                                 {toolResult != null && renderToolResult(toolName, toolResult)}
                               </CollapsibleToolResult>
                             ) : toolName === "analyzeGitHubRepository" ? (
@@ -1163,6 +1299,10 @@ function AISearchContent() {
                                     ? `Searching the web for "${(toolPart.input as { query?: string })?.query || 'information'}"...`
                                     : toolName === "scrapeUrls"
                                     ? `Scraping ${(toolPart.input as { urls?: string[] })?.urls?.length || ''} URL${((toolPart.input as { urls?: string[] })?.urls?.length || 0) !== 1 ? 's' : ''}...`
+                                    : toolName === "linkedinSearch"
+                                    ? `Searching LinkedIn profiles...`
+                                    : toolName === "linkedinProfile"
+                                    ? `Fetching LinkedIn profile for ${(toolPart.input as { profileUrlOrUsername?: string })?.profileUrlOrUsername || 'user'}...`
                                     : `Analyzing ${(toolPart.input as { username?: string })?.username || 'profile'}...`}
                                 </span>
                               </div>
@@ -1308,13 +1448,27 @@ function AISearchContent() {
             )}
           </AnimatePresence>
 
+          {/* Attached artifact preview */}
+          <AnimatePresence>
+            {attachedArtifact && (
+              <div className="px-2 pb-2">
+                <TextArtifactPreview
+                  content={attachedArtifact.content}
+                  filename={attachedArtifact.filename}
+                  onRemove={() => setAttachedArtifact(null)}
+                />
+              </div>
+            )}
+          </AnimatePresence>
+
           <div className="flex gap-2 items-center">
             <Input
               ref={inputRef}
               value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={roastMode ? "Who's getting roasted today? 🔥" : "Ask me to find developers... (type @ for users)"}
+              onPaste={handlePaste}
+              placeholder={roastMode ? "Who's getting roasted today? 🔥" : attachedArtifact ? "Add a message about the attached file..." : "Ask me to find developers... (type @ for users)"}
               className={`flex-1 h-12 bg-transparent border-0 focus:ring-0 focus-visible:ring-0 text-white transition-colors duration-300 ${
                 roastMode ? 'placeholder:text-red-400/60' : 'placeholder:text-muted-foreground'
               }`}
@@ -1322,7 +1476,7 @@ function AISearchContent() {
             />
             <Button
               type="submit"
-              disabled={isLoading || !inputValue.trim()}
+              disabled={isLoading || (!inputValue.trim() && !attachedArtifact)}
               className={`h-12 w-12 transition-all duration-300 ${
                 roastMode
                   ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400'
@@ -1333,6 +1487,8 @@ function AISearchContent() {
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : roastMode ? (
                 <Flame className="h-5 w-5" />
+              ) : attachedArtifact ? (
+                <Paperclip className="h-5 w-5" />
               ) : (
                 <Send className="h-5 w-5" />
               )}

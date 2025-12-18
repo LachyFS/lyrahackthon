@@ -11,27 +11,18 @@ import {
   type AnalysisProgress,
 } from "@/lib/actions/repo-analyze";
 import { searchWithProgress, type SearchProgress } from "@/lib/actions/search-agent";
+import {
+  scrapeLinkedInProfile,
+  searchLinkedInProfiles,
+  type LinkedInProfile,
+  type LinkedInSearchOptions,
+} from "@/lib/linkedin";
 import { checkRateLimit } from "@/lib/redis";
 import { checkBotId } from "botid/server";
+import { getGitHubToken } from "@/lib/github-token";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
-
-// Get GitHub token from user's OAuth session
-async function getGitHubToken(): Promise<string | null> {
-  try {
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (session?.provider_token) {
-      return session.provider_token;
-    }
-  } catch (error) {
-    console.warn("Could not get session token:", error);
-  }
-
-  return null;
-}
 
 // GitHub API headers helper
 function getGitHubHeaders(token: string | null): Record<string, string> {
@@ -80,6 +71,9 @@ async function analyzeGitHubProfileTool(username: string, token: string | null) 
     if (!profileRes.ok) {
       if (profileRes.status === 404) {
         return { error: `User "${username}" not found on GitHub` };
+      }
+      if (profileRes.status === 401) {
+        return { error: `GitHub session expired. Please sign out and sign back in to refresh your GitHub access.`, code: "GITHUB_TOKEN_EXPIRED" };
       }
       if (profileRes.status === 403) {
         return { error: `GitHub API rate limit exceeded. Please try again later.` };
@@ -349,6 +343,9 @@ async function searchGitHubUsersAPI(
     const res = await fetch(searchUrl, { headers, next: { revalidate: 60 } });
 
     if (!res.ok) {
+      if (res.status === 401) {
+        return { error: "GitHub session expired. Please sign out and sign back in to refresh your GitHub access.", code: "GITHUB_TOKEN_EXPIRED" };
+      }
       if (res.status === 403) {
         return { error: "GitHub API rate limit exceeded. Please try again later." };
       }
@@ -856,7 +853,7 @@ You have access to these tools:
    - NOTE: This takes 1-3 minutes to run as it performs deep analysis.
 
 **General web tools:**
-6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, LinkedIn profiles, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
 
 7. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
@@ -868,8 +865,13 @@ You have access to these tools:
    Search types: general, github_profiles, linkedin, portfolio, news, technical.
    NOTE: Takes 30-60 seconds but provides comprehensive analysis.
 
+**LinkedIn tools:**
+9. **linkedinSearch**: Search for LinkedIn profiles by name, job title, company, skills, or location. Returns profile URLs with snippets. Use this to find candidates' professional profiles.
+
+10. **linkedinProfile**: Scrape detailed information from a specific LinkedIn profile URL or username. Returns comprehensive data including work history, education, skills, certifications, and more. Use this after linkedinSearch or when you have a specific profile URL.
+
 **Outreach tools:**
-9. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
+11. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
@@ -1171,6 +1173,110 @@ NOTE: This search takes 30-60 seconds as it scrapes and analyzes multiple pages.
             const errorMsg = `Search failed: ${error instanceof Error ? error.message : String(error)}`;
             yield { status: 'error' as const, message: errorMsg, error: errorMsg, query };
             return { error: errorMsg, query };
+          }
+        },
+      }),
+      linkedinSearch: tool({
+        description: `Search for LinkedIn profiles using advanced filters. This uses LinkedIn's search directly (not web search) and returns detailed profile data.
+
+Search options:
+- **searchQuery**: General fuzzy search (e.g., "Machine Learning Engineer", "John Doe")
+- **currentJobTitles**: Exact job title match (e.g., ["Software Engineer", "Data Scientist"])
+- **locations**: Filter by location (e.g., ["Sydney", "San Francisco", "London"])
+- **currentCompanies**: LinkedIn company URLs (e.g., ["google", "meta"])
+- **pastCompanies**: Previous employers
+- **schools**: LinkedIn school URLs (e.g., ["stanford-university"])
+
+Returns full profile data including work history, education, skills, and more. No need to call linkedinProfile separately unless you want to refresh the data.
+
+NOTE: This search can take 30-60 seconds as it fetches complete profile data.`,
+        inputSchema: z.object({
+          searchQuery: z.string().optional().describe("General search query (fuzzy search), e.g. 'Machine Learning Engineer' or 'John Doe'"),
+          currentJobTitles: z.array(z.string()).optional().describe("List of exact job titles to search for, e.g. ['Software Engineer', 'Senior Developer']"),
+          locations: z.array(z.string()).optional().describe("List of locations, e.g. ['Sydney', 'New York', 'London']"),
+          currentCompanies: z.array(z.string()).optional().describe("List of LinkedIn company URL slugs where they currently work, e.g. ['google', 'meta', 'amazon']"),
+          pastCompanies: z.array(z.string()).optional().describe("List of LinkedIn company URL slugs where they previously worked"),
+          schools: z.array(z.string()).optional().describe("List of LinkedIn school URL slugs, e.g. ['stanford-university', 'mit']"),
+          maxResults: z.number().optional().describe("Maximum number of results to return (default 10, max 25)"),
+        }),
+        execute: async ({ searchQuery, currentJobTitles, locations, currentCompanies, pastCompanies, schools, maxResults }) => {
+          try {
+            const options: LinkedInSearchOptions = {
+              profileScraperMode: "Full",
+              maxItems: Math.min(maxResults || 10, 25),
+              takePages: 1,
+            };
+
+            if (searchQuery) options.searchQuery = searchQuery;
+            if (currentJobTitles?.length) options.currentJobTitles = currentJobTitles;
+            if (locations?.length) options.locations = locations;
+            if (currentCompanies?.length) options.currentCompanies = currentCompanies;
+            if (pastCompanies?.length) options.pastCompanies = pastCompanies;
+            if (schools?.length) options.schools = schools;
+
+            const profiles = await searchLinkedInProfiles(options);
+
+            return {
+              searchParams: { searchQuery, currentJobTitles, locations, currentCompanies },
+              profiles: profiles.map(p => ({
+                name: p.name,
+                headline: p.headline,
+                location: p.location,
+                profileUrl: p.profileUrl,
+                currentCompany: p.currentCompany,
+                currentRole: p.currentRole,
+                about: p.about?.slice(0, 500),
+                openToWork: p.openToWork,
+                verified: p.verified,
+                connectionCount: p.connectionCount,
+                topSkills: p.topSkills,
+                experience: p.experience.slice(0, 3).map(e => ({
+                  title: e.title,
+                  company: e.company,
+                  duration: e.duration,
+                  isCurrent: e.isCurrent,
+                })),
+                education: p.education.slice(0, 2).map(e => ({
+                  school: e.school,
+                  degree: e.degree,
+                  field: e.field,
+                })),
+                skills: p.skills.slice(0, 10),
+              })),
+              total: profiles.length,
+            };
+          } catch (error) {
+            return { error: `LinkedIn search failed: ${error instanceof Error ? error.message : String(error)}` };
+          }
+        },
+      }),
+      linkedinProfile: tool({
+        description: `Scrape detailed information from a LinkedIn profile. Returns comprehensive professional data including:
+- Name, headline, location, about/summary
+- Current company and role
+- Full work history with dates and descriptions
+- Education history
+- Skills list
+- Certifications
+- Languages
+
+Use this after finding profiles with linkedinSearch or when you have a specific LinkedIn URL/username to analyze. Great for:
+- Deep candidate research
+- Verifying work history
+- Understanding career trajectory
+- Finding skills and certifications`,
+        inputSchema: z.object({
+          profileUrlOrUsername: z.string().describe("LinkedIn profile URL (e.g., 'https://linkedin.com/in/johndoe') or just the username (e.g., 'johndoe')"),
+        }),
+        execute: async ({ profileUrlOrUsername }): Promise<LinkedInProfile | { error: string; profileUrl: string }> => {
+          try {
+            const profile = await scrapeLinkedInProfile(profileUrlOrUsername);
+            return profile;
+          } catch (error) {
+            return {
+              error: `Failed to scrape LinkedIn profile: ${error instanceof Error ? error.message : String(error)}`,
+              profileUrl: profileUrlOrUsername,
+            };
           }
         },
       }),

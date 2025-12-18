@@ -11,6 +11,13 @@ import { schema } from "@vercel/sandbox/dist/utils/get-credentials";
 // TYPES & SCHEMAS
 // ============================================================================
 
+/**
+ * Maximum repository size in MB (default: 100MB)
+ * Repositories larger than this will be rejected to prevent
+ * excessive resource usage and long clone times.
+ */
+const DEFAULT_MAX_REPO_SIZE_MB = 100;
+
 export interface RepoAnalysisConfig {
   repoUrl: string;
   /**
@@ -26,6 +33,11 @@ export interface RepoAnalysisConfig {
    * Number of vCPUs for the sandbox (default: 2)
    */
   vcpus?: 1 | 2 | 4;
+  /**
+   * Maximum repository size in MB (default: 100MB)
+   * Set to 0 or undefined to use the default limit
+   */
+  maxRepoSizeMB?: number;
 }
 
 // Schema for the final structured analysis output
@@ -164,6 +176,7 @@ export type RepoAnalysis = z.infer<typeof repoAnalysisSchema>;
 // Progress update types for streaming to UI
 export type AnalysisProgressStatus =
   | 'validating'
+  | 'checking_repo_size'
   | 'spinning_up_sandbox'
   | 'cloning_repository'
   | 'executing_command'
@@ -208,6 +221,10 @@ export interface ParallelRepoAnalysisConfig {
    * Maximum number of repos to analyze concurrently (default: 3)
    */
   concurrency?: number;
+  /**
+   * Maximum repository size in MB (default: 100MB)
+   */
+  maxRepoSizeMB?: number;
 }
 
 export interface ParallelRepoProgress {
@@ -260,6 +277,52 @@ function parseTimeout(timeout: string): number {
     case "m": return num * 60 * 1000;
     case "h": return num * 60 * 60 * 1000;
     default: throw new Error(`Unknown time unit: ${unit}`);
+  }
+}
+
+// ============================================================================
+// REPOSITORY SIZE CHECK
+// ============================================================================
+
+/**
+ * Get repository size from GitHub API
+ * Returns size in KB (as provided by GitHub API)
+ */
+async function getRepoSizeKB(owner: string, repo: string): Promise<{
+  sizeKB: number;
+  sizeMB: number;
+  error?: string;
+}> {
+  try {
+    // Use unauthenticated request first (to avoid needing token)
+    // This works for public repos
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'repo-analyzer',
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return { sizeKB: 0, sizeMB: 0, error: 'Repository not found' };
+      }
+      if (response.status === 403) {
+        // Rate limited - return a warning but allow to proceed
+        console.warn('GitHub API rate limited, skipping size check');
+        return { sizeKB: 0, sizeMB: 0, error: 'rate_limited' };
+      }
+      return { sizeKB: 0, sizeMB: 0, error: `GitHub API error: ${response.status}` };
+    }
+
+    const data = await response.json();
+    const sizeKB = data.size || 0;
+    const sizeMB = sizeKB / 1024;
+
+    return { sizeKB, sizeMB };
+  } catch (error) {
+    console.error('Error fetching repo size:', error);
+    return { sizeKB: 0, sizeMB: 0, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
 
@@ -447,7 +510,7 @@ const DANGEROUS_PATTERNS = [
 export async function* analyzeRepositoryWithProgress(
   config: RepoAnalysisConfig
 ): AsyncGenerator<AnalysisProgress, AnalysisProgress, unknown> {
-  const { repoUrl, timeout = "5m", hiringBrief, vcpus = 2 } = config;
+  const { repoUrl, timeout = "5m", hiringBrief, vcpus = 2, maxRepoSizeMB = DEFAULT_MAX_REPO_SIZE_MB } = config;
 
   // Parse repo URL to get owner/name
   const urlMatch = repoUrl.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/);
@@ -465,10 +528,57 @@ export async function* analyzeRepositoryWithProgress(
   }
   const [, repoOwner, repoName] = urlMatch;
 
+  // Yield: Checking repository size
+  yield {
+    status: 'checking_repo_size',
+    message: `Checking repository size for ${repoOwner}/${repoName}...`,
+    repoName,
+    repoOwner,
+  };
+
+  // Check repository size before creating sandbox
+  const sizeCheck = await getRepoSizeKB(repoOwner, repoName);
+
+  if (sizeCheck.error && sizeCheck.error !== 'rate_limited') {
+    yield {
+      status: 'error',
+      message: `Failed to check repository: ${sizeCheck.error}`,
+      error: sizeCheck.error,
+      repoName,
+      repoOwner,
+    };
+    return {
+      status: 'error',
+      message: `Failed to check repository: ${sizeCheck.error}`,
+      error: sizeCheck.error,
+      repoName,
+      repoOwner,
+    };
+  }
+
+  // Check if repo exceeds size limit (skip if rate limited)
+  if (sizeCheck.error !== 'rate_limited' && sizeCheck.sizeMB > maxRepoSizeMB) {
+    const errorMsg = `Repository is too large (${sizeCheck.sizeMB.toFixed(1)}MB). Maximum allowed size is ${maxRepoSizeMB}MB.`;
+    yield {
+      status: 'error',
+      message: errorMsg,
+      error: errorMsg,
+      repoName,
+      repoOwner,
+    };
+    return {
+      status: 'error',
+      message: errorMsg,
+      error: errorMsg,
+      repoName,
+      repoOwner,
+    };
+  }
+
   // Yield: Spinning up sandbox
   yield {
     status: 'spinning_up_sandbox',
-    message: `Spinning up virtual sandbox for ${repoOwner}/${repoName}...`,
+    message: `Spinning up virtual sandbox for ${repoOwner}/${repoName}...${sizeCheck.sizeMB > 0 ? ` (${sizeCheck.sizeMB.toFixed(1)}MB)` : ''}`,
     repoName,
     repoOwner,
   };
@@ -968,7 +1078,8 @@ export async function* analyzeMultipleRepositoriesWithProgress(
     timeout = "5m",
     hiringBrief,
     vcpus = 2,
-    concurrency = 3
+    concurrency = 3,
+    maxRepoSizeMB = DEFAULT_MAX_REPO_SIZE_MB
   } = config;
 
   // Validate and parse all URLs first
@@ -1062,6 +1173,7 @@ export async function* analyzeMultipleRepositoriesWithProgress(
       timeout,
       hiringBrief,
       vcpus,
+      maxRepoSizeMB,
     });
     activeAnalyses.set(info.url, generator);
     repoIndex++;
@@ -1132,6 +1244,7 @@ export async function* analyzeMultipleRepositoriesWithProgress(
           timeout,
           hiringBrief,
           vcpus,
+          maxRepoSizeMB,
         });
         activeAnalyses.set(nextInfo.url, nextGenerator);
         repoIndex++;

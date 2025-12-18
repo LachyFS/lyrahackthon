@@ -1,9 +1,9 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
 import { generateObject } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
+import { getGitHubToken } from "@/lib/github-token";
 
 export interface GitHubProfile {
   login: string;
@@ -129,17 +129,6 @@ export interface AnalysisResult {
   };
 }
 
-async function getGitHubToken(): Promise<string | null> {
-  const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-
-  if (session?.provider_token) {
-    return session.provider_token;
-  }
-
-  return null;
-}
-
 async function fetchGitHub<T>(endpoint: string, token: string | null): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github.v3+json",
@@ -154,6 +143,9 @@ async function fetchGitHub<T>(endpoint: string, token: string | null): Promise<T
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error("User not found");
+    }
+    if (response.status === 401) {
+      throw new Error("GitHub session expired. Please sign out and sign back in to refresh your GitHub access.");
     }
     if (response.status === 403) {
       throw new Error("Rate limit exceeded. Please sign in with GitHub for higher limits.");
@@ -186,7 +178,7 @@ async function fetchGitHubGraphQL<T>(query: string, variables: Record<string, un
 
   if (!response.ok) {
     if (response.status === 401) {
-      throw new Error("Authentication required for GraphQL API.");
+      throw new Error("GitHub session expired. Please sign out and sign back in to refresh your GitHub access.");
     }
     if (response.status === 403) {
       throw new Error("Rate limit exceeded. Please try again later.");

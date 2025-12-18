@@ -1,21 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-
-// Get GitHub token from user's OAuth session
-async function getGitHubToken(): Promise<string | null> {
-  try {
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (session?.provider_token) {
-      return session.provider_token;
-    }
-  } catch (error) {
-    console.warn("Could not get session token:", error);
-  }
-
-  return null;
-}
+import { getGitHubToken } from "@/lib/github-token";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -45,6 +29,12 @@ export async function GET(request: NextRequest) {
     );
 
     if (!res.ok) {
+      if (res.status === 401) {
+        return NextResponse.json(
+          { error: "GitHub session expired. Please sign out and sign back in.", code: "GITHUB_TOKEN_EXPIRED" },
+          { status: 401 }
+        );
+      }
       if (res.status === 403) {
         return NextResponse.json(
           { error: "GitHub API rate limit exceeded" },

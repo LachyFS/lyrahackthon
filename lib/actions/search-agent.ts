@@ -1,8 +1,14 @@
 "use server";
 
 import Exa from "exa-js";
-import { streamText, generateObject, tool } from "ai";
+import { streamText, tool } from "ai";
 import { z } from "zod";
+import {
+  scrapeLinkedInProfile,
+  searchLinkedInProfiles,
+  type LinkedInProfile,
+  type LinkedInSearchOptions,
+} from "../linkedin";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
@@ -35,53 +41,21 @@ export interface SearchAgentConfig {
   context?: string;
 }
 
-// Schema for the final structured search output
-const searchAnalysisSchema = z.object({
-  query: z.string().describe("The original search query"),
-  searchType: z.string().describe("Type of search performed"),
-  totalResultsFound: z.number().describe("Total number of results found across all searches"),
-  resultsAnalyzed: z.number().describe("Number of results that were analyzed in detail"),
-
-  // Summary of findings
-  summary: z.string().describe("A comprehensive summary of all findings from the search"),
-
-  // Key themes/topics
-  keyThemes: z.array(z.object({
-    theme: z.string().describe("The theme or topic"),
-    frequency: z.enum(["high", "medium", "low"]).describe("How often this theme appeared"),
-    relatedResults: z.array(z.string()).describe("URLs of results related to this theme"),
-  })).describe("Key themes that emerged across the search results"),
-
-  // Top results with analysis
-  topResults: z.array(z.object({
-    url: z.string(),
-    title: z.string(),
-    relevanceScore: z.number(),
-    snippet: z.string().nullable(),
-    keyInsights: z.array(z.string()),
-    contentType: z.enum(["article", "profile", "documentation", "forum", "news", "other"]).describe("Type of content"),
-  })).describe("Top most relevant results with analysis"),
-
-  // Entities found (people, companies, technologies, etc.)
-  entitiesFound: z.array(z.object({
-    name: z.string(),
-    type: z.enum(["person", "company", "technology", "product", "location", "other"]),
-    mentions: z.number().describe("Number of times mentioned across results"),
-    context: z.string().describe("Brief context about this entity"),
-  })).describe("Notable entities found in the search results"),
-
-  // Recommendations for follow-up
-  followUpSuggestions: z.array(z.string()).describe("Suggested follow-up searches or actions"),
-
-  // Raw scraped data for reference
-  rawResults: z.array(z.object({
-    url: z.string(),
-    title: z.string(),
-    contentPreview: z.string().describe("First 500 chars of content"),
-  })).describe("Raw scraped results for reference"),
-});
-
-export type SearchAnalysis = z.infer<typeof searchAnalysisSchema>;
+// Type for the final search output (raw agent results, no summarization)
+export interface SearchAnalysis {
+  query: string;
+  searchType: string;
+  totalResultsFound: number;
+  resultsAnalyzed: number;
+  // Raw agent response text (the agent's final summary/findings)
+  agentResponse: string;
+  // Tool calls made by the agent
+  toolCalls: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    resultsCount?: number;
+  }>;
+}
 
 // Progress update types for streaming to UI
 export type SearchProgressStatus =
@@ -92,7 +66,6 @@ export type SearchProgressStatus =
   | 'searching'
   | 'scraping'
   | 'analyzing_result'
-  | 'synthesizing'
   | 'complete'
   | 'error';
 
@@ -126,14 +99,22 @@ export interface SearchProgress {
 function createSearchTools(config: SearchAgentConfig) {
   return {
     web_search: tool({
-      description: "Search the web for information. Returns scraped content from matching pages. Use this for general queries.",
+      description: `Search the web for information. Returns scraped content from matching pages.
+
+Use includeDomains/excludeDomains to focus your search:
+- For GitHub profiles/repos: includeDomains: ["github.com"]
+- For LinkedIn profiles: includeDomains: ["linkedin.com"]
+- For technical content: includeDomains: ["stackoverflow.com", "dev.to", "medium.com", "hackernoon.com", "reddit.com", "news.ycombinator.com"]
+- For news: excludeDomains: ["github.com", "stackoverflow.com"] (to avoid code results)
+- For portfolios: excludeDomains: ["linkedin.com", "github.com", "twitter.com", "facebook.com"]`,
       inputSchema: z.object({
         query: z.string().describe("The search query"),
-        numResults: z.number().optional().describe("Number of results to return (1-10)"),
-        includeDomains: z.array(z.string()).optional().describe("Only include results from these domains"),
+        numResults: z.number().optional().describe("Number of results to return (1-10, default 5)"),
+        includeDomains: z.array(z.string()).optional().describe("Only include results from these domains (e.g. ['github.com', 'linkedin.com'])"),
         excludeDomains: z.array(z.string()).optional().describe("Exclude results from these domains"),
       }),
       execute: async ({ query, numResults, includeDomains, excludeDomains }) => {
+        console.log("Searching the web for:", query, "with numResults:", numResults, "includeDomains:", includeDomains, "excludeDomains:", excludeDomains);
         const result = await exa.searchAndContents(query, {
           numResults: Math.min(numResults || 5, 10),
           includeDomains: includeDomains || config.includeDomains,
@@ -141,6 +122,7 @@ function createSearchTools(config: SearchAgentConfig) {
           type: "auto",
           text: { maxCharacters: 3000 },
         });
+        console.log("Search results:", result.results);
         return result.results.map(r => ({
           url: r.url,
           title: r.title,
@@ -155,9 +137,10 @@ function createSearchTools(config: SearchAgentConfig) {
       description: "Find web pages similar to a given URL. Useful for discovering related content, competitors, or alternative sources.",
       inputSchema: z.object({
         url: z.string().describe("URL to find similar pages for"),
-        numResults: z.number().optional().describe("Number of similar pages to find"),
+        numResults: z.number().optional().describe("Number of similar pages to find (default 5)"),
       }),
       execute: async ({ url, numResults }) => {
+        console.log("Finding similar pages for:", url, "with numResults:", numResults);
         const result = await exa.findSimilarAndContents(url, {
           numResults: Math.min(numResults || 5, 10),
           text: { maxCharacters: 2000 },
@@ -177,6 +160,7 @@ function createSearchTools(config: SearchAgentConfig) {
         urls: z.array(z.string()).describe("URLs to scrape (max 5)"),
       }),
       execute: async ({ urls }) => {
+        console.log("Scraping URLs:", urls);
         const result = await exa.getContents(urls.slice(0, 5), {
           text: { maxCharacters: 5000 },
         });
@@ -190,100 +174,76 @@ function createSearchTools(config: SearchAgentConfig) {
       },
     }),
 
-    search_github: tool({
-      description: "Search GitHub specifically for repositories, profiles, or code. Best for finding developers or open source projects.",
+    linkedin_profile: tool({
+      description: `Scrape detailed information from a LinkedIn profile. Use this when you have a LinkedIn profile URL or username and need comprehensive professional information including work history, education, skills, and certifications.
+
+IMPORTANT: This tool requires a LinkedIn profile URL or username. To find LinkedIn profiles first, use web_search with includeDomains: ["linkedin.com"] or use the query pattern "site:linkedin.com/in/ <person name>"`,
       inputSchema: z.object({
-        query: z.string().describe("Search query focused on GitHub content"),
-        numResults: z.number().optional().describe("Number of results to return"),
+        profileUrlOrUsername: z.string().describe("LinkedIn profile URL (e.g., 'https://linkedin.com/in/johndoe') or just the username (e.g., 'johndoe')"),
       }),
-      execute: async ({ query, numResults }) => {
-        const result = await exa.searchAndContents(query, {
-          numResults: Math.min(numResults || 5, 10),
-          includeDomains: ["github.com"],
-          type: "auto",
-          text: { maxCharacters: 2000 },
-        });
-        return result.results.map(r => ({
-          url: r.url,
-          title: r.title,
-          content: r.text?.slice(0, 1500) || "",
-          // Parse GitHub-specific info from URL
-          isProfile: /^https?:\/\/github\.com\/[^\/]+\/?$/.test(r.url),
-          isRepo: /^https?:\/\/github\.com\/[^\/]+\/[^\/]+\/?$/.test(r.url),
-        }));
+      execute: async ({ profileUrlOrUsername }): Promise<LinkedInProfile | { error: string; profileUrl: string }> => {
+        console.log("Scraping LinkedIn profile:", profileUrlOrUsername);
+        try {
+          const profile = await scrapeLinkedInProfile(profileUrlOrUsername);
+          return profile;
+        } catch (error) {
+          console.error("LinkedIn scrape error:", error);
+          return {
+            error: error instanceof Error ? error.message : "Failed to scrape LinkedIn profile",
+            profileUrl: profileUrlOrUsername,
+          };
+        }
       },
     }),
 
-    search_linkedin: tool({
-      description: "Search LinkedIn for professional profiles and company pages.",
-      inputSchema: z.object({
-        query: z.string().describe("Search query for LinkedIn content"),
-        numResults: z.number().optional().describe("Number of results to return"),
-      }),
-      execute: async ({ query, numResults }) => {
-        const result = await exa.searchAndContents(query, {
-          numResults: Math.min(numResults || 5, 10),
-          includeDomains: ["linkedin.com"],
-          type: "neural",
-          text: { maxCharacters: 2000 },
-        });
-        return result.results.map(r => ({
-          url: r.url,
-          title: r.title,
-          content: r.text?.slice(0, 1500) || "",
-          isCompany: r.url.includes("/company/"),
-          isProfile: r.url.includes("/in/"),
-        }));
-      },
-    }),
+    linkedin_search: tool({
+      description: `Search for LinkedIn profiles using advanced filters. This searches LinkedIn directly and returns detailed profile data.
 
-    search_news: tool({
-      description: "Search for recent news articles and press coverage.",
-      inputSchema: z.object({
-        query: z.string().describe("News search query"),
-        numResults: z.number().optional().describe("Number of results to return"),
-      }),
-      execute: async ({ query, numResults }) => {
-        const result = await exa.searchAndContents(query, {
-          numResults: Math.min(numResults || 5, 10),
-          type: "neural",
-          text: { maxCharacters: 2000 },
-        });
-        return result.results.map(r => ({
-          url: r.url,
-          title: r.title,
-          content: r.text?.slice(0, 1500) || "",
-          publishedDate: r.publishedDate,
-          author: r.author,
-        }));
-      },
-    }),
+Search options:
+- searchQuery: General fuzzy search (e.g., "Machine Learning Engineer", "John Doe")
+- currentJobTitles: Exact job title match (e.g., ["Software Engineer", "Data Scientist"])
+- locations: Filter by location (e.g., ["Sydney", "San Francisco"])
+- currentCompanies: LinkedIn company slugs (e.g., ["google", "meta"])
 
-    search_technical: tool({
-      description: "Search technical resources like Stack Overflow, dev.to, Medium tech blogs, and documentation sites.",
+Returns full profile data including work history, education, and skills.`,
       inputSchema: z.object({
-        query: z.string().describe("Technical search query"),
-        numResults: z.number().optional().describe("Number of results to return"),
+        searchQuery: z.string().optional().describe("General search query (fuzzy search)"),
+        currentJobTitles: z.array(z.string()).optional().describe("List of exact job titles to search for"),
+        locations: z.array(z.string()).optional().describe("List of locations"),
+        currentCompanies: z.array(z.string()).optional().describe("List of LinkedIn company URL slugs"),
+        maxResults: z.number().optional().describe("Maximum results (default 10, max 25)"),
       }),
-      execute: async ({ query, numResults }) => {
-        const result = await exa.searchAndContents(query, {
-          numResults: Math.min(numResults || 5, 10),
-          includeDomains: [
-            "stackoverflow.com",
-            "dev.to",
-            "medium.com",
-            "hackernoon.com",
-            "reddit.com",
-            "docs.github.com",
-          ],
-          type: "auto",
-          text: { maxCharacters: 2000 },
-        });
-        return result.results.map(r => ({
-          url: r.url,
-          title: r.title,
-          content: r.text?.slice(0, 1500) || "",
-          source: new URL(r.url).hostname,
+      execute: async ({ searchQuery, currentJobTitles, locations, currentCompanies, maxResults }) => {
+        console.log("Searching LinkedIn profiles:", { searchQuery, currentJobTitles, locations });
+
+        const options: LinkedInSearchOptions = {
+          profileScraperMode: "Full",
+          maxItems: Math.min(maxResults || 10, 25),
+          takePages: 1,
+        };
+
+        if (searchQuery) options.searchQuery = searchQuery;
+        if (currentJobTitles?.length) options.currentJobTitles = currentJobTitles;
+        if (locations?.length) options.locations = locations;
+        if (currentCompanies?.length) options.currentCompanies = currentCompanies;
+
+        const profiles = await searchLinkedInProfiles(options);
+
+        return profiles.map(p => ({
+          name: p.name,
+          headline: p.headline,
+          location: p.location,
+          profileUrl: p.profileUrl,
+          currentCompany: p.currentCompany,
+          currentRole: p.currentRole,
+          about: p.about?.slice(0, 300),
+          openToWork: p.openToWork,
+          skills: p.skills.slice(0, 10),
+          experience: p.experience.slice(0, 3).map(e => ({
+            title: e.title,
+            company: e.company,
+            duration: e.duration,
+          })),
         }));
       },
     }),
@@ -299,28 +259,37 @@ function getAgentSystemPrompt(config: SearchAgentConfig): string {
 
 ## YOUR TOOLS
 
-1. **web_search** - General web search with content scraping. Good for broad queries.
+1. **web_search** - Search the web with optional domain filtering. Use includeDomains/excludeDomains to focus:
+   - GitHub: includeDomains: ["github.com"]
+   - LinkedIn: includeDomains: ["linkedin.com"]
+   - Technical: includeDomains: ["stackoverflow.com", "dev.to", "medium.com", "reddit.com", "news.ycombinator.com"]
+   - News: excludeDomains: ["github.com", "stackoverflow.com"]
+   - Portfolios: excludeDomains: ["linkedin.com", "github.com", "twitter.com"]
+
 2. **find_similar** - Find pages similar to a URL. Great for discovering related content.
+
 3. **scrape_urls** - Get full content from specific URLs when you need more detail.
-4. **search_github** - Search GitHub for repos, profiles, and code.
-5. **search_linkedin** - Search LinkedIn for professional profiles and companies.
-6. **search_news** - Search recent news and press coverage.
-7. **search_technical** - Search Stack Overflow, dev.to, Medium, and technical docs.
+
+4. **linkedin_search** - Search specifically for LinkedIn profiles by name, title, company, or skills. Returns profile URLs that can be scraped for details.
+
+5. **linkedin_profile** - Scrape detailed information from a LinkedIn profile URL or username. Returns comprehensive professional data including work history, education, skills, certifications, and more. Use this after finding profiles with linkedin_search or web_search.
 
 ## RESEARCH STRATEGY
 
 1. **Start broad** - Begin with a general search to understand the landscape
-2. **Identify key sources** - Note important URLs, people, companies, technologies
+2. **Focus with domains** - Use includeDomains/excludeDomains to target specific sources
 3. **Go deeper** - Use find_similar or targeted searches to explore promising leads
 4. **Cross-reference** - Verify information across multiple sources
 5. **Fill gaps** - Use scrape_urls to get more detail from important pages
+6. **For people research** - Use linkedin_search to find profiles, then linkedin_profile to get detailed professional info
 
 ## IMPORTANT GUIDELINES
 
 - Make multiple tool calls to gather comprehensive information
 - Don't stop after just one search - explore multiple angles
-- Use the right tool for the job (e.g., search_github for developers, search_news for recent events)
+- Use domain filtering strategically (e.g., includeDomains: ["github.com"] for developers)
 - When you find an interesting URL, consider using find_similar to discover related content
+- For researching professionals, use linkedin_search + linkedin_profile for detailed career information
 - Summarize your findings thoroughly at the end
 
 ## OUTPUT FORMAT
@@ -334,15 +303,15 @@ After researching, provide a comprehensive summary that includes:
 
   // Add search-type specific guidance
   const typeGuidance: Record<string, string> = {
-    github_profiles: `\n\n## FOCUS: GitHub Profiles\nYou're looking for GitHub developer profiles. Use search_github primarily. Look for:\n- Developer expertise and languages\n- Notable repositories and contributions\n- Activity levels and commit history\n- Open source involvement`,
+    github_profiles: `\n\n## FOCUS: GitHub Profiles\nYou're looking for GitHub developer profiles. Use includeDomains: ["github.com"]. Look for:\n- Developer expertise and languages\n- Notable repositories and contributions\n- Activity levels and commit history\n- Open source involvement`,
 
-    linkedin: `\n\n## FOCUS: LinkedIn Profiles\nYou're searching for professional profiles. Use search_linkedin primarily. Look for:\n- Work history and experience\n- Skills and endorsements\n- Education and certifications\n- Professional connections and companies`,
+    linkedin: `\n\n## FOCUS: LinkedIn Profiles\nYou're searching for professional profiles. Use the linkedin_search tool to find profiles, then linkedin_profile to get detailed information. Look for:\n- Work history and experience\n- Skills and endorsements\n- Education and certifications\n- Professional connections and companies\n- Current role and company`,
 
-    portfolio: `\n\n## FOCUS: Portfolio Sites\nYou're looking for personal portfolio websites. Exclude social media. Look for:\n- Personal projects and case studies\n- Design work and technical skills\n- Contact information\n- Client testimonials`,
+    portfolio: `\n\n## FOCUS: Portfolio Sites\nYou're looking for personal portfolio websites. Use excludeDomains: ["linkedin.com", "github.com", "twitter.com", "facebook.com"]. Look for:\n- Personal projects and case studies\n- Design work and technical skills\n- Contact information\n- Client testimonials`,
 
-    news: `\n\n## FOCUS: News & Recent Events\nYou're searching for recent news. Use search_news primarily. Look for:\n- Recent announcements and developments\n- Press coverage and media mentions\n- Industry trends and analysis\n- Timeline of events`,
+    news: `\n\n## FOCUS: News & Recent Events\nYou're searching for recent news. Use excludeDomains: ["github.com", "stackoverflow.com"]. Look for:\n- Recent announcements and developments\n- Press coverage and media mentions\n- Industry trends and analysis\n- Timeline of events`,
 
-    technical: `\n\n## FOCUS: Technical Content\nYou're researching technical topics. Use search_technical primarily. Look for:\n- Code examples and implementations\n- Best practices and patterns\n- Common issues and solutions\n- Documentation and tutorials`,
+    technical: `\n\n## FOCUS: Technical Content\nYou're researching technical topics. Use includeDomains: ["stackoverflow.com", "dev.to", "medium.com", "hackernoon.com", "reddit.com", "news.ycombinator.com"]. Look for:\n- Code examples and implementations\n- Best practices and patterns\n- Common issues and solutions\n- Documentation and tutorials`,
   };
 
   const guidance = config.searchType && typeGuidance[config.searchType]
@@ -451,53 +420,15 @@ export async function* searchWithProgress(
     // Get the final text response
     const finalText = await result.text;
 
-    // Yield: Synthesizing
-    yield {
-      status: 'synthesizing',
-      message: 'Structuring research findings...',
+    // Build the analysis directly from raw results (no summarization step)
+    const analysis: SearchAnalysis = {
       query,
-      resultsFound: totalResultsFound,
-      resultsProcessed: toolCalls.length,
+      searchType,
+      totalResultsFound,
+      resultsAnalyzed: toolCalls.length,
+      agentResponse: finalText || `Research completed for "${query}" with ${totalResultsFound} results.`,
       toolCalls,
     };
-
-    // Use generateObject to structure the final output
-    let analysis: SearchAnalysis;
-    try {
-      const structuredResult = await generateObject({
-        model: 'anthropic/claude-sonnet-4-20250514',
-        schema: searchAnalysisSchema,
-        prompt: `Based on the following research findings, create a structured analysis.
-
-Original query: "${query}"
-Search type: ${searchType}
-Number of searches performed: ${toolCalls.length}
-Total results found: ${totalResultsFound}
-
-Research findings:
-${finalText}
-
-Create a comprehensive structured analysis of these findings.`,
-      });
-
-      analysis = structuredResult.object;
-    } catch (structureError) {
-      console.error("Failed to structure analysis:", structureError);
-
-      // Fallback analysis
-      analysis = {
-        query,
-        searchType,
-        totalResultsFound,
-        resultsAnalyzed: toolCalls.length,
-        summary: finalText || `Research completed for "${query}" with ${totalResultsFound} results.`,
-        keyThemes: [],
-        topResults: [],
-        entitiesFound: [],
-        followUpSuggestions: [`Search for more specific terms related to: ${query}`],
-        rawResults: [],
-      };
-    }
 
     // Return complete
     const finalProgress: SearchProgress = {
