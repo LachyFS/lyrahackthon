@@ -1,9 +1,7 @@
 "use client";
 
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AnalysisResult } from "@/lib/actions/github-analyze";
-import { getFeedPosts, hasLiked } from "@/lib/actions/posts";
-import type { Post, Profile } from "@/src/db/schema";
 
 // Query keys factory for consistent key management
 export const queryKeys = {
@@ -17,9 +15,6 @@ export const queryKeys = {
 
   // GitHub user search (autocomplete)
   githubUsers: (query: string) => [...queryKeys.all, "github-users", query] as const,
-
-  // Feed posts
-  feedPosts: (searchQuery?: string) => [...queryKeys.all, "feed-posts", searchQuery ?? ""] as const,
 
   // User collaboration data
   userCollaboration: (username: string) => [...queryKeys.all, "user-collaboration", username] as const,
@@ -94,34 +89,6 @@ export function useGitHubUserSearch(query: string, options?: { enabled?: boolean
   });
 }
 
-// Feed posts infinite query hook
-export function useFeedPosts(searchQuery?: string, pageSize: number = 20) {
-  return useInfiniteQuery({
-    queryKey: queryKeys.feedPosts(searchQuery),
-    queryFn: async ({ pageParam = 1 }): Promise<{
-      posts: (Post & { author: Profile })[];
-      likedStatus: boolean[];
-      nextPage: number | null;
-    }> => {
-      const posts = await getFeedPosts(pageParam, pageSize, searchQuery);
-
-      // Get liked status for all posts
-      const likedStatus = await Promise.all(
-        posts.map((post) => hasLiked(post.id))
-      );
-
-      return {
-        posts: posts as (Post & { author: Profile })[],
-        likedStatus,
-        nextPage: posts.length === pageSize ? pageParam + 1 : null,
-      };
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => lastPage.nextPage,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-  });
-}
-
 // User collaboration hook (for graph navigation)
 import { fetchUserCollaboration, type CollaborationData, type GitHubProfile } from "@/lib/actions/github-analyze";
 
@@ -180,8 +147,6 @@ export function useInvalidateQueries() {
   return {
     invalidateSearchHistory: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.searchHistory() }),
-    invalidateFeedPosts: (searchQuery?: string) =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.feedPosts(searchQuery) }),
     invalidateProfileAnalysis: (username: string) =>
       queryClient.invalidateQueries({ queryKey: queryKeys.profileAnalysis(username) }),
   };

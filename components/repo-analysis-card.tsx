@@ -25,7 +25,7 @@ import {
   FileSearch,
 } from "lucide-react";
 import { useState } from "react";
-import type { RepoAnalysis, AnalysisProgress } from "@/lib/actions/repo-analyze";
+import type { RepoAnalysis, AnalysisProgress, ParallelAnalysisProgress, ParallelRepoProgress } from "@/lib/actions/repo-analyze";
 
 interface RepoAnalysisCardProps {
   analysis: RepoAnalysis;
@@ -607,6 +607,202 @@ export function RepoAnalysisError({ error, repoUrl }: { error: string; repoUrl: 
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// PARALLEL REPO ANALYSIS COMPONENTS
+// ============================================================================
+
+// Mini progress indicator for a single repo in parallel analysis
+function ParallelRepoProgressItem({ repo }: { repo: ParallelRepoProgress }) {
+  const getStatusColor = () => {
+    switch (repo.status) {
+      case 'complete': return 'bg-emerald-500';
+      case 'error': return 'bg-red-500';
+      case 'validating': return 'bg-cyan-500';
+      case 'spinning_up_sandbox': return 'bg-purple-500';
+      case 'cloning_repository': return 'bg-emerald-500/70';
+      case 'executing_command': return 'bg-yellow-500';
+      case 'analyzing': return 'bg-blue-500';
+      case 'generating_report': return 'bg-pink-500';
+      default: return 'bg-white/30';
+    }
+  };
+
+  const getStatusIcon = () => {
+    switch (repo.status) {
+      case 'complete':
+        return <CheckCircle className="h-4 w-4 text-emerald-400" />;
+      case 'error':
+        return <AlertTriangle className="h-4 w-4 text-red-400" />;
+      default:
+        return <Loader2 className="h-4 w-4 animate-spin text-white/60" />;
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+      <div className="flex-shrink-0">{getStatusIcon()}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <a
+            href={repo.repoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-emerald-400 hover:text-emerald-300 hover:underline truncate"
+          >
+            {repo.repoOwner}/{repo.repoName}
+          </a>
+        </div>
+        <p className="text-xs text-muted-foreground truncate mt-0.5">
+          {repo.message}
+        </p>
+      </div>
+      <div className={`h-2 w-2 rounded-full ${getStatusColor()} ${repo.status !== 'complete' && repo.status !== 'error' ? 'animate-pulse' : ''}`} />
+    </div>
+  );
+}
+
+// Progress display for parallel repo analysis
+export function ParallelRepoAnalysisProgress({ progress }: { progress: ParallelAnalysisProgress }) {
+  const completedPercentage = progress.totalCount > 0
+    ? Math.round((progress.completedCount / progress.totalCount) * 100)
+    : 0;
+
+  return (
+    <div className="border border-white/10 rounded-lg overflow-hidden bg-white/5">
+      {/* Header */}
+      <div className="p-4 border-b border-white/10 bg-white/5">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <GitFork className="h-5 w-5 text-emerald-400" />
+            <span className="text-sm font-medium text-white">
+              Analyzing {progress.totalCount} Repositories
+            </span>
+          </div>
+          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+            {progress.completedCount}/{progress.totalCount} Complete
+          </Badge>
+        </div>
+        {/* Progress bar */}
+        <div className="w-full bg-white/10 rounded-full h-2">
+          <div
+            className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+            style={{ width: `${completedPercentage}%` }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">{progress.message}</p>
+      </div>
+
+      {/* Individual repo progress */}
+      <div className="p-4 space-y-2 max-h-80 overflow-y-auto">
+        {progress.repos.map((repo) => (
+          <ParallelRepoProgressItem key={repo.repoUrl} repo={repo} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Final results display for parallel repo analysis
+export function ParallelRepoAnalysisResults({
+  results
+}: {
+  results: Array<{
+    repoUrl: string;
+    repoName: string;
+    repoOwner: string;
+    result?: RepoAnalysis;
+    error?: string;
+  }>;
+}) {
+  const [expandedRepo, setExpandedRepo] = useState<string | null>(null);
+
+  const successCount = results.filter(r => r.result && !r.error).length;
+  const errorCount = results.filter(r => r.error).length;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary header */}
+      <div className="flex items-center justify-between p-4 rounded-lg bg-white/5 border border-white/10">
+        <div className="flex items-center gap-3">
+          <GitFork className="h-5 w-5 text-emerald-400" />
+          <span className="text-sm font-medium text-white">
+            Analyzed {results.length} Repositories
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {successCount > 0 && (
+            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+              {successCount} Successful
+            </Badge>
+          )}
+          {errorCount > 0 && (
+            <Badge variant="outline" className="bg-red-500/10 text-red-400 border-red-500/30">
+              {errorCount} Failed
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {/* Individual results */}
+      <div className="space-y-4">
+        {results.map((item) => {
+          const isExpanded = expandedRepo === item.repoUrl;
+
+          if (item.error) {
+            return (
+              <RepoAnalysisError
+                key={item.repoUrl}
+                error={item.error}
+                repoUrl={item.repoUrl}
+              />
+            );
+          }
+
+          if (item.result) {
+            return (
+              <div key={item.repoUrl} className="border border-white/10 rounded-lg overflow-hidden">
+                {/* Collapsible header */}
+                <button
+                  onClick={() => setExpandedRepo(isExpanded ? null : item.repoUrl)}
+                  className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-emerald-400" />
+                    <div className="text-left">
+                      <span className="text-sm font-medium text-white">
+                        {item.repoOwner}/{item.repoName}
+                      </span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <SkillBadge level={item.result.skillLevel} />
+                        <Badge variant="outline" className="text-xs">
+                          {item.result.codeQuality} quality
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {item.result.hiringRecommendation.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Expanded content */}
+                {isExpanded && (
+                  <div className="border-t border-white/10">
+                    <RepoAnalysisCard analysis={item.result} />
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          return null;
+        })}
       </div>
     </div>
   );

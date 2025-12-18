@@ -38,10 +38,10 @@ import { createClient } from "@/lib/supabase/client";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 import { EmailDraft } from "@/components/email-draft";
-import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress } from "@/components/repo-analysis-card";
+import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress, ParallelRepoAnalysisProgress, ParallelRepoAnalysisResults } from "@/components/repo-analysis-card";
 import { SearchAgentCard, SearchAgentError, SearchAgentSkeleton, SearchAgentProgress } from "@/components/search-agent-card";
 import { motion, AnimatePresence } from "framer-motion";
-import type { RepoAnalysis, AnalysisProgress } from "@/lib/actions/repo-analyze";
+import type { RepoAnalysis, AnalysisProgress, ParallelAnalysisProgress } from "@/lib/actions/repo-analyze";
 import { useSearchHistory, useGitHubUserSearch } from "@/hooks/use-queries";
 import type { SearchAnalysis, SearchProgress } from "@/lib/actions/search-agent";
 
@@ -733,6 +733,58 @@ function AISearchContent() {
 
       // It's a direct RepoAnalysis object
       return <RepoAnalysisCard analysis={data as RepoAnalysis} />;
+    }
+
+    if (toolName === "analyzeGitHubRepositories") {
+      // Result types for parallel analysis:
+      // 1. ParallelAnalysisProgress (streaming progress with repos array)
+      // 2. Array of results (final results)
+      // 3. Error object
+      type ParallelResult = ParallelAnalysisProgress | Array<{
+        repoUrl: string;
+        repoName: string;
+        repoOwner: string;
+        result?: RepoAnalysis;
+        error?: string;
+      }> | { error: string };
+
+      const data = result as ParallelResult;
+
+      // Check if it's an error response
+      if ("error" in data && !Array.isArray(data) && !("type" in data)) {
+        return (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <Bug className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-sm font-medium text-red-300 mb-1">Parallel Analysis Failed</div>
+                <p className="text-xs text-red-300/70">{(data as { error: string }).error}</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // Check if it's a ParallelAnalysisProgress (streaming update)
+      if ("type" in data && "repos" in data) {
+        const progressData = data as ParallelAnalysisProgress;
+
+        // If complete, show final results
+        if (progressData.type === 'complete' && progressData.results) {
+          return <ParallelRepoAnalysisResults results={progressData.results} />;
+        }
+
+        // Show progress
+        return <ParallelRepoAnalysisProgress progress={progressData} />;
+      }
+
+      // It's a direct array of results
+      if (Array.isArray(data)) {
+        return <ParallelRepoAnalysisResults results={data} />;
+      }
+
+      // Fallback
+      return <RepoAnalysisSkeleton />;
     }
 
     if (toolName === "webSearch") {
