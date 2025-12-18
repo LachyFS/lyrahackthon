@@ -108,7 +108,7 @@ DATABASE_URL=
   </tr>
   <tr>
     <td><strong>Database</strong></td>
-    <td>PostgreSQL (Supabase), Drizzle ORM</td>
+    <td>PostgreSQL, Drizzle ORM</td>
   </tr>
   <tr>
     <td><strong>AI</strong></td>
