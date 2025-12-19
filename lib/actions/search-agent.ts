@@ -9,6 +9,7 @@ import {
   type LinkedInProfile,
   type LinkedInSearchOptions,
 } from "../linkedin";
+import { getRelatedGitHubUsers } from "./github-analyze";
 
 // Initialize Exa client
 const exa = new Exa(process.env.EXA_API_KEY);
@@ -247,6 +248,69 @@ Returns full profile data including work history, education, and skills.`,
         }));
       },
     }),
+
+    github_profile_lookup: tool({
+      description: `Look up a GitHub user profile and find related developers based on repository contributions.
+
+This tool analyzes a GitHub user's repositories and finds other developers who have contributed to the same projects. This is extremely useful for:
+- Finding developers with similar expertise/interests
+- Discovering team members or collaborators
+- Surfacing relevant candidates who work on similar codebases
+- Understanding someone's professional network in open source
+
+Returns the user's profile info plus a list of related developers sorted by the number of shared repositories.`,
+      inputSchema: z.object({
+        username: z.string().describe("GitHub username to look up (e.g., 'torvalds', 'gaearon')"),
+      }),
+      execute: async ({ username }): Promise<{
+        profile: {
+          login: string;
+          name: string | null;
+          bio: string | null;
+          company: string | null;
+          location: string | null;
+          followers: number;
+          public_repos: number;
+          avatar_url: string;
+        };
+        relatedUsers: Array<{
+          login: string;
+          avatar_url: string;
+          relationship: string;
+          sharedRepos: string[];
+        }>;
+      } | { error: string; username: string }> => {
+        console.log("Looking up GitHub profile and related users:", username);
+        try {
+          const { profile, relatedUsers } = await getRelatedGitHubUsers(username);
+
+          return {
+            profile: {
+              login: profile.login,
+              name: profile.name,
+              bio: profile.bio,
+              company: profile.company,
+              location: profile.location,
+              followers: profile.followers,
+              public_repos: profile.public_repos,
+              avatar_url: profile.avatar_url,
+            },
+            relatedUsers: relatedUsers.slice(0, 15).map(u => ({
+              login: u.login,
+              avatar_url: u.avatar_url,
+              relationship: u.relationship,
+              sharedRepos: u.sharedRepos.slice(0, 5),
+            })),
+          };
+        } catch (error) {
+          console.error("GitHub profile lookup error:", error);
+          return {
+            error: error instanceof Error ? error.message : "Failed to look up GitHub profile",
+            username,
+          };
+        }
+      },
+    }),
   };
 }
 
@@ -274,6 +338,12 @@ function getAgentSystemPrompt(config: SearchAgentConfig): string {
 
 5. **linkedin_profile** - Scrape detailed information from a LinkedIn profile URL or username. Returns comprehensive professional data including work history, education, skills, certifications, and more. Use this after finding profiles with linkedin_search or web_search.
 
+6. **github_profile_lookup** - Look up a GitHub user and find related developers based on repository contributions. This is EXTREMELY powerful for:
+   - Finding developers who work on similar projects
+   - Discovering collaborators and team members
+   - Surfacing candidates with relevant open source experience
+   - Understanding someone's professional network in tech
+
 ## RESEARCH STRATEGY
 
 1. **Start broad** - Begin with a general search to understand the landscape
@@ -282,6 +352,7 @@ function getAgentSystemPrompt(config: SearchAgentConfig): string {
 4. **Cross-reference** - Verify information across multiple sources
 5. **Fill gaps** - Use scrape_urls to get more detail from important pages
 6. **For people research** - Use linkedin_search to find profiles, then linkedin_profile to get detailed professional info
+7. **For developer research** - Use github_profile_lookup to find related developers through shared repository contributions
 
 ## IMPORTANT GUIDELINES
 
@@ -290,6 +361,8 @@ function getAgentSystemPrompt(config: SearchAgentConfig): string {
 - Use domain filtering strategically (e.g., includeDomains: ["github.com"] for developers)
 - When you find an interesting URL, consider using find_similar to discover related content
 - For researching professionals, use linkedin_search + linkedin_profile for detailed career information
+- For finding developers, use github_profile_lookup - it returns related users who contribute to the same repositories
+- When searching for GitHub developers, use github_profile_lookup first to get related developers, then investigate the most promising ones
 - Summarize your findings thoroughly at the end
 
 ## OUTPUT FORMAT
@@ -299,11 +372,12 @@ After researching, provide a comprehensive summary that includes:
 - Important entities (people, companies, technologies)
 - Notable patterns or themes
 - Relevant URLs and sources
+- Related developers found through repo contributions (when applicable)
 - Suggested follow-up areas`;
 
   // Add search-type specific guidance
   const typeGuidance: Record<string, string> = {
-    github_profiles: `\n\n## FOCUS: GitHub Profiles\nYou're looking for GitHub developer profiles. Use includeDomains: ["github.com"]. Look for:\n- Developer expertise and languages\n- Notable repositories and contributions\n- Activity levels and commit history\n- Open source involvement`,
+    github_profiles: `\n\n## FOCUS: GitHub Profiles\nYou're looking for GitHub developer profiles. Use these strategies:\n1. **Start with github_profile_lookup** if you have a username - this returns the profile AND related developers who contribute to the same repos\n2. Use web_search with includeDomains: ["github.com"] to find profiles by name/skill\n3. Once you find a relevant developer, use github_profile_lookup to discover their collaborators\n\nLook for:\n- Developer expertise and languages\n- Notable repositories and contributions\n- Related developers (collaborators on the same projects)\n- Activity levels and commit history\n- Open source involvement`,
 
     linkedin: `\n\n## FOCUS: LinkedIn Profiles\nYou're searching for professional profiles. Use the linkedin_search tool to find profiles, then linkedin_profile to get detailed information. Look for:\n- Work history and experience\n- Skills and endorsements\n- Education and certifications\n- Professional connections and companies\n- Current role and company`,
 
@@ -363,7 +437,7 @@ export async function* searchWithProgress(
   try {
     // Use streamText for the agentic loop
     const result = streamText({
-      model: 'anthropic/claude-sonnet-4-20250514',
+      model: 'google/gemini-3-flash',
       system: getAgentSystemPrompt(config),
       prompt: researchPrompt,
       tools,

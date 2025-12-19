@@ -782,7 +782,7 @@ After gathering information, provide your complete structured analysis as a JSON
     };
 
     const result = streamText({
-      model: "xai/google/gemini-3-flash" as Parameters<typeof streamText>[0]["model"],
+      model: "google/gemini-3-flash" as Parameters<typeof streamText>[0]["model"],
       system: systemPrompt,
       prompt: `Analyze this repository thoroughly. Use the bash tool to explore the codebase and gather information.
 
@@ -902,7 +902,7 @@ Be thorough but fair. Look for positive signals, not just problems. Consider the
     let output: RepoAnalysis;
     try {
       const structuredResult = await generateObject({
-        model: 'google/gemini-3-pro-preview',
+        model: 'google/gemini-3-flash',
         providerOptions: {
           openai: {
             reasoningEffort: "none",

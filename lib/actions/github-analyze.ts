@@ -917,3 +917,79 @@ export async function fetchUserCollaboration(username: string): Promise<{
 
   return { profile, collaboration };
 }
+
+// Type for related GitHub user
+export interface RelatedGitHubUser {
+  login: string;
+  avatar_url: string;
+  relationship: string;
+  sharedRepos: string[];
+  contributionCount?: number;
+}
+
+// Fetch related users based on repo contributions - useful for surfacing relevant developers
+export async function getRelatedGitHubUsers(username: string): Promise<{
+  profile: GitHubProfile;
+  relatedUsers: RelatedGitHubUser[];
+}> {
+  const token = await getGitHubToken();
+
+  // Fetch profile and repos
+  const [profile, repos] = await Promise.all([
+    getCachedGitHubProfile(username, token),
+    getCachedGitHubRepos(username, token, 30),
+  ]);
+
+  // Fetch collaboration data
+  const collaboration = await fetchCollaborationData(username, repos, token);
+
+  // Build a map of users to their shared repos
+  const userRepoMap = new Map<string, { avatar_url: string; repos: Set<string>; relationship: string }>();
+
+  for (const collab of collaboration.collaborators) {
+    if (collab.type === "org") continue; // Skip orgs
+    if (collab.login.toLowerCase() === username.toLowerCase()) continue;
+
+    if (!userRepoMap.has(collab.login)) {
+      userRepoMap.set(collab.login, {
+        avatar_url: collab.avatar_url,
+        repos: new Set(),
+        relationship: collab.relationship,
+      });
+    }
+  }
+
+  // Map connections to find which repos each user is connected to
+  for (const conn of collaboration.connections) {
+    if (conn.type === "org") continue;
+
+    // Find user-to-repo connections
+    if (conn.source.startsWith("repo:")) {
+      const repoName = conn.source.replace("repo:", "");
+      const userData = userRepoMap.get(conn.target);
+      if (userData) {
+        userData.repos.add(repoName);
+      }
+    }
+    if (conn.target.startsWith("repo:")) {
+      const repoName = conn.target.replace("repo:", "");
+      const userData = userRepoMap.get(conn.source);
+      if (userData) {
+        userData.repos.add(repoName);
+      }
+    }
+  }
+
+  // Convert to array and sort by number of shared repos
+  const relatedUsers: RelatedGitHubUser[] = Array.from(userRepoMap.entries())
+    .map(([login, data]) => ({
+      login,
+      avatar_url: data.avatar_url,
+      relationship: data.relationship,
+      sharedRepos: Array.from(data.repos),
+    }))
+    .filter(user => user.sharedRepos.length > 0)
+    .sort((a, b) => b.sharedRepos.length - a.sharedRepos.length);
+
+  return { profile, relatedUsers };
+}

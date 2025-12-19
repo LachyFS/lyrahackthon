@@ -139,9 +139,13 @@ function UserNode({ data }: { data: { label: string; avatar: string; isCenter?: 
 }
 
 // Custom node component for repository nodes
-function RepoNodeComponent({ data }: { data: { label: string; fullName: string; description: string | null; stars: number; language: string | null; isFork?: boolean; isFaded?: boolean } }) {
-  // Different styling for forks vs original repos
-  const borderColor = data.isFork ? "border-slate-500/70" : "border-amber-500/70";
+function RepoNodeComponent({ data }: { data: { label: string; fullName: string; description: string | null; stars: number; language: string | null; isFork?: boolean; isFaded?: boolean; isSelected?: boolean } }) {
+  // Different styling for forks vs original repos, with selection override
+  const getBorderColor = () => {
+    if (data.isSelected) return "border-white ring-2 ring-white/40";
+    if (data.isFork) return "border-slate-500/70";
+    return "border-amber-500/70";
+  };
   const hoverBorderColor = data.isFork ? "group-hover:border-slate-400" : "group-hover:border-amber-400";
   const iconColor = data.isFork ? "text-slate-400" : "text-amber-400";
 
@@ -179,7 +183,7 @@ function RepoNodeComponent({ data }: { data: { label: string; fullName: string; 
         isConnectable={false}
       />
 
-      <div className={`rounded-lg border-2 ${borderColor} bg-background px-3 py-2 min-w-[80px] max-w-[140px] transition-all group-hover:scale-105 ${hoverBorderColor}`}>
+      <div className={`rounded-lg border-2 ${getBorderColor()} bg-background px-3 py-2 min-w-[80px] max-w-[140px] transition-all group-hover:scale-105 ${hoverBorderColor}`}>
         <div className="flex items-center gap-1.5 mb-1">
           <GitFork className={`h-3 w-3 ${iconColor} flex-shrink-0`} />
           <span className="text-xs font-medium text-white truncate">{data.label}</span>
@@ -229,11 +233,57 @@ function CollaborationGraphInner({
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const { fitView } = useReactFlow();
 
-  // Filter out org type collaborators - we show orgs as badges instead
-  const nonOrgCollaborators = useMemo(() =>
-    collaborators.filter(c => c.type !== "org"),
-    [collaborators]
-  );
+  // Filter out repos with no collaborators and no stars (unless they're all we have)
+  // Also filter collaborators to only show those connected to filtered repos
+  const { filteredRepos, filteredCollaborators } = useMemo(() => {
+    // First, filter out org type collaborators
+    const nonOrgCollabs = collaborators.filter(c => c.type !== "org");
+
+    // Check which repos have collaborators connected to them
+    const reposWithCollaborators = new Set<string>();
+    connections.forEach(conn => {
+      if (conn.source.startsWith('repo:')) {
+        if (conn.target !== profile.login) {
+          reposWithCollaborators.add(conn.source);
+        }
+      }
+      if (conn.target.startsWith('repo:')) {
+        if (conn.source !== profile.login) {
+          reposWithCollaborators.add(conn.target);
+        }
+      }
+    });
+
+    // Filter repos: keep if has collaborators OR has stars
+    const interestingRepos = repos.filter(repo => {
+      const repoId = `repo:${repo.full_name}`;
+      return reposWithCollaborators.has(repoId) || repo.stars > 0;
+    });
+
+    // Use all repos if none are interesting (fallback)
+    const finalRepos = interestingRepos.length > 0 ? interestingRepos : repos;
+    const finalRepoIds = new Set(finalRepos.map(r => `repo:${r.full_name}`));
+
+    // Filter collaborators to only those connected to the filtered repos
+    const collabsConnectedToFilteredRepos = new Set<string>();
+    connections.forEach(conn => {
+      if (finalRepoIds.has(conn.source) && conn.target !== profile.login) {
+        collabsConnectedToFilteredRepos.add(conn.target);
+      }
+      if (finalRepoIds.has(conn.target) && conn.source !== profile.login) {
+        collabsConnectedToFilteredRepos.add(conn.source);
+      }
+    });
+
+    const finalCollaborators = nonOrgCollabs.filter(c =>
+      collabsConnectedToFilteredRepos.has(c.login)
+    );
+
+    return {
+      filteredRepos: finalRepos,
+      filteredCollaborators: finalCollaborators.length > 0 ? finalCollaborators : nonOrgCollabs
+    };
+  }, [repos, collaborators, connections, profile.login]);
 
   // Get connected nodes for the selected node (including through repos)
   const connectedNodeIds = useMemo(() => {
@@ -283,21 +333,21 @@ function CollaborationGraphInner({
       y: centerY,
     });
 
-    // Repo nodes - cluster closer to center
-    repos.forEach((repo, i) => {
-      const angle = (2 * Math.PI * i) / Math.max(repos.length, 1);
+    // Repo nodes - spread around center
+    filteredRepos.forEach((repo, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(filteredRepos.length, 1);
       d3Nodes.push({
         id: `repo:${repo.full_name}`,
         type: "repo",
-        x: centerX + Math.cos(angle) * 150 + (Math.random() - 0.5) * 50,
-        y: centerY + Math.sin(angle) * 150 + (Math.random() - 0.5) * 50,
+        x: centerX + Math.cos(angle) * 250 + (Math.random() - 0.5) * 80,
+        y: centerY + Math.sin(angle) * 250 + (Math.random() - 0.5) * 80,
       });
     });
 
-    // Collaborator nodes - spread out organically
-    nonOrgCollaborators.forEach((collab, i) => {
-      const angle = (2 * Math.PI * i) / Math.max(nonOrgCollaborators.length, 1);
-      const radius = 250 + (Math.random() * 100);
+    // Collaborator nodes - spread out further
+    filteredCollaborators.forEach((collab, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(filteredCollaborators.length, 1);
+      const radius = 400 + (Math.random() * 150);
       d3Nodes.push({
         id: collab.login,
         type: "collaborator",
@@ -321,7 +371,7 @@ function CollaborationGraphInner({
     });
 
     return { nodes: d3Nodes, links: d3Links };
-  }, [profile.login, repos, nonOrgCollaborators, connections]);
+  }, [profile.login, filteredRepos, filteredCollaborators, connections]);
 
   // Run D3 force simulation - Obsidian-style continuous physics
   useEffect(() => {
@@ -345,29 +395,29 @@ function CollaborationGraphInner({
         .distance((link) => {
           const source = link.source as SimNode;
           const target = link.target as SimNode;
-          if (source.isCenter || target.isCenter) return 180;
-          if (source.type === "repo" || target.type === "repo") return 150;
-          return 200;
+          if (source.isCenter || target.isCenter) return 280;
+          if (source.type === "repo" || target.type === "repo") return 220;
+          return 300;
         })
-        .strength(0.6))
+        .strength(0.4))
       // Charge force - nodes repel each other
       .force("charge", d3.forceManyBody<SimNode>()
         .strength((d) => {
-          if (d.isCenter) return -600;
-          if (d.type === "repo") return -300;
-          return -200;
+          if (d.isCenter) return -1000;
+          if (d.type === "repo") return -500;
+          return -400;
         })
-        .distanceMax(400))
+        .distanceMax(600))
       // Collision - prevent overlapping
       .force("collision", d3.forceCollide<SimNode>()
         .radius((d) => {
-          if (d.isCenter) return 60;
-          if (d.type === "repo") return 50;
-          return 40;
+          if (d.isCenter) return 80;
+          if (d.type === "repo") return 70;
+          return 60;
         })
-        .strength(0.7))
+        .strength(0.8))
       // Centering force
-      .force("center", d3.forceCenter(450, 350).strength(0.05))
+      .force("center", d3.forceCenter(450, 350).strength(0.03))
       // Faster settling for better performance
       .velocityDecay(0.6)
       .alphaDecay(0.05)
@@ -428,15 +478,15 @@ function CollaborationGraphInner({
     }
   }, []);
 
-  // Generate edges only once (not dependent on positions)
+  // Generate edges with fading based on selection
   const graphEdges = useMemo(() => {
     const edges: Edge[] = [];
     const nodeIds = new Set<string>();
 
     // Collect all node IDs
     nodeIds.add(profile.login);
-    repos.forEach(repo => nodeIds.add(`repo:${repo.full_name}`));
-    nonOrgCollaborators.forEach(collab => nodeIds.add(collab.login));
+    filteredRepos.forEach(repo => nodeIds.add(`repo:${repo.full_name}`));
+    filteredCollaborators.forEach(collab => nodeIds.add(collab.login));
 
     connections.forEach((conn, index) => {
       if (conn.type === "org") return;
@@ -448,6 +498,10 @@ function CollaborationGraphInner({
           edgeColor = "#f59e0b";
         }
 
+        // Check if edge should be faded (when there's a selection and either endpoint is not connected)
+        const isFaded = selectedNode &&
+          (!connectedNodeIds.has(conn.source) || !connectedNodeIds.has(conn.target));
+
         edges.push({
           id: `edge-${index}-${conn.source}-${conn.target}`,
           source: conn.source,
@@ -456,13 +510,15 @@ function CollaborationGraphInner({
           style: {
             stroke: edgeColor,
             strokeWidth: 2,
+            opacity: isFaded ? 0.15 : 1,
+            transition: 'opacity 0.3s ease',
           },
         });
       }
     });
 
     return edges;
-  }, [profile.login, repos, nonOrgCollaborators, connections]);
+  }, [profile.login, filteredRepos, filteredCollaborators, connections, selectedNode, connectedNodeIds]);
 
   // Generate React Flow nodes using simulated positions
   const initialNodes = useMemo(() => {
@@ -500,7 +556,7 @@ function CollaborationGraphInner({
     });
 
     // Repo nodes
-    repos.forEach((repo) => {
+    filteredRepos.forEach((repo) => {
       const nodeId = `repo:${repo.full_name}`;
       const pos = getPosition(nodeId, centerX, centerY);
 
@@ -517,13 +573,14 @@ function CollaborationGraphInner({
           stars: repo.stars,
           language: repo.language,
           isFork: repo.isFork,
+          isSelected: selectedNode === nodeId,
           isFaded: shouldFade(nodeId),
         },
       });
     });
 
     // Collaborator nodes
-    nonOrgCollaborators.forEach((collab) => {
+    filteredCollaborators.forEach((collab) => {
       const pos = getPosition(collab.login, centerX, centerY);
 
       nodes.push({
@@ -544,7 +601,7 @@ function CollaborationGraphInner({
     });
 
     return nodes;
-  }, [profile, nonOrgCollaborators, repos, organizations, selectedNode, connectedNodeIds]);
+  }, [profile, filteredCollaborators, filteredRepos, organizations, selectedNode, connectedNodeIds]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges] = useEdgesState(graphEdges);
@@ -566,6 +623,24 @@ function CollaborationGraphInner({
     );
   }, [simulatedPositions, setNodes]);
 
+  // Update node data when selection changes (for fading/highlighting)
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        const isFaded = selectedNode ? !connectedNodeIds.has(node.id) : false;
+        const isSelected = selectedNode === node.id;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isFaded,
+            isSelected,
+          },
+        };
+      })
+    );
+  }, [selectedNode, connectedNodeIds, setNodes]);
+
   // Only update edges when the graph structure changes (new user/data)
   useEffect(() => {
     setEdges(graphEdges);
@@ -577,7 +652,13 @@ function CollaborationGraphInner({
       return;
     }
 
-    // Immediately navigate to the clicked user's network
+    // If clicking a repo node, toggle selection filter
+    if (node.id.startsWith('repo:')) {
+      setSelectedNode(prev => prev === node.id ? null : node.id);
+      return;
+    }
+
+    // For user nodes, navigate to their network
     onNavigateToUser(node.id);
   }, [profile.login, onNavigateToUser]);
 
