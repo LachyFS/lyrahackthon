@@ -4,6 +4,9 @@ import { generateObject } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { getGitHubToken } from "@/lib/github-token";
+import { unstable_cache } from "next/cache";
+
+const CACHE_TTL = 3600; // 1 hour in seconds
 
 export interface GitHubProfile {
   login: string;
@@ -195,6 +198,66 @@ async function fetchGitHubGraphQL<T>(query: string, variables: Record<string, un
   return result.data;
 }
 
+// Cached GitHub API fetch for profile
+const getCachedGitHubProfile = unstable_cache(
+  async (username: string, token: string | null): Promise<GitHubProfile> => {
+    return fetchGitHub<GitHubProfile>(`/users/${username}`, token);
+  },
+  ["github-profile"],
+  { revalidate: CACHE_TTL, tags: ["github"] }
+);
+
+// Cached GitHub API fetch for repos
+const getCachedGitHubRepos = unstable_cache(
+  async (username: string, token: string | null, perPage: number = 100): Promise<GitHubRepo[]> => {
+    return fetchGitHub<GitHubRepo[]>(`/users/${username}/repos?per_page=${perPage}&sort=updated`, token);
+  },
+  ["github-repos"],
+  { revalidate: CACHE_TTL, tags: ["github"] }
+);
+
+// Cached GitHub API fetch for events
+const getCachedGitHubEvents = unstable_cache(
+  async (username: string, token: string | null): Promise<GitHubEvent[]> => {
+    return fetchGitHub<GitHubEvent[]>(`/users/${username}/events?per_page=100`, token);
+  },
+  ["github-events"],
+  { revalidate: CACHE_TTL, tags: ["github"] }
+);
+
+// Cached GitHub search users
+const getCachedGitHubSearchUsers = unstable_cache(
+  async (query: string, limit: number, token: string | null): Promise<{ login: string; avatar_url: string; name?: string }[]> => {
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github.v3+json",
+    };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const res = await fetch(
+      `https://api.github.com/search/users?q=${encodeURIComponent(query)}&per_page=${limit}`,
+      { headers }
+    );
+
+    if (!res.ok) {
+      throw new Error(`GitHub search error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    return data.items?.map((user: { login: string; avatar_url: string; name?: string }) => ({
+      login: user.login,
+      avatar_url: user.avatar_url,
+      name: user.name,
+    })) || [];
+  },
+  ["github-search-users"],
+  { revalidate: CACHE_TTL, tags: ["github"] }
+);
+
+// Export for use in API routes
+export { getCachedGitHubSearchUsers };
+
 function calculateLanguages(repos: GitHubRepo[]): { name: string; count: number; percentage: number }[] {
   const languageCounts: Record<string, number> = {};
   let total = 0;
@@ -312,7 +375,7 @@ ${topRepos.map(r => `- ${r.name}: ${r.description || "No description"} (⭐${r.s
 Provide a thorough but fair assessment. Base your analysis on actual evidence from the profile. Don't penalize for things that might just be private (e.g., contributions to private repos won't show).`;
 
   const { object } = await generateObject({
-    model: "grok-4.1-fast-reasoning",
+    model: "google/gemini-3-flash",
     schema: llmAnalysisSchema,
     prompt,
   });
@@ -755,11 +818,11 @@ async function fetchCollaborationData(
 export async function analyzeGitHubProfile(username: string): Promise<AnalysisResult> {
   const token = await getGitHubToken();
 
-  // Fetch basic data in parallel
+  // Fetch basic data in parallel (with caching)
   const [profile, repos, events] = await Promise.all([
-    fetchGitHub<GitHubProfile>(`/users/${username}`, token),
-    fetchGitHub<GitHubRepo[]>(`/users/${username}/repos?per_page=100&sort=updated`, token),
-    fetchGitHub<GitHubEvent[]>(`/users/${username}/events?per_page=100`, token),
+    getCachedGitHubProfile(username, token),
+    getCachedGitHubRepos(username, token, 100),
+    getCachedGitHubEvents(username, token),
   ]);
 
   // Fetch collaboration data (depends on repos)
@@ -843,10 +906,10 @@ export async function fetchUserCollaboration(username: string): Promise<{
 }> {
   const token = await getGitHubToken();
 
-  // Fetch profile and repos in parallel
+  // Fetch profile and repos in parallel (with caching)
   const [profile, repos] = await Promise.all([
-    fetchGitHub<GitHubProfile>(`/users/${username}`, token),
-    fetchGitHub<GitHubRepo[]>(`/users/${username}/repos?per_page=50&sort=updated`, token),
+    getCachedGitHubProfile(username, token),
+    getCachedGitHubRepos(username, token, 50),
   ]);
 
   // Fetch collaboration data

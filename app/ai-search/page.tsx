@@ -48,6 +48,14 @@ import type { RepoAnalysis, AnalysisProgress, ParallelAnalysisProgress } from "@
 import { useSearchHistory, useGitHubUserSearch } from "@/hooks/use-queries";
 import type { SearchAnalysis, SearchProgress } from "@/lib/actions/search-agent";
 
+// Module-level storage for artifact (survives component remounts)
+interface TextArtifactData {
+  id: string;
+  content: string;
+  filename: string;
+}
+let moduleArtifact: TextArtifactData | null = null;
+
 // Types for message parts
 interface TextPart {
   type: "text";
@@ -180,9 +188,8 @@ function CollapsibleToolResult({
         <span>{getToolLabel(toolName)}</span>
       </button>
       <div
-        className={`overflow-hidden transition-all duration-300 ease-in-out ${
-          isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
-        }`}
+        className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+          }`}
       >
         {children}
       </div>
@@ -208,13 +215,8 @@ function AISearchContent() {
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  // Text artifact state for large pastes
-  interface TextArtifactData {
-    id: string;
-    content: string;
-    filename: string;
-  }
-  const [attachedArtifact, setAttachedArtifact] = useState<TextArtifactData | null>(null);
+  // Text artifact state for large pastes (also uses module-level storage as backup)
+  const [attachedArtifact, setAttachedArtifact] = useState<TextArtifactData | null>(() => moduleArtifact);
 
   // React Query hooks for data fetching
   const { data: recentSearches = [], isLoading: loadingRecent } = useSearchHistory(8);
@@ -255,11 +257,14 @@ function AISearchContent() {
 
       const { suggestedFilename } = detectTextType(pastedText);
 
-      setAttachedArtifact({
+      const newArtifact = {
         id: crypto.randomUUID(),
         content: pastedText,
         filename: suggestedFilename,
-      });
+      };
+      // Set module-level storage AND state
+      moduleArtifact = newArtifact;
+      setAttachedArtifact(newArtifact);
 
       // Don't set the input value, the artifact is attached instead
     }
@@ -268,7 +273,9 @@ function AISearchContent() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const hasContent = inputValue.trim() || attachedArtifact;
+    // Use module-level storage as fallback if state got reset
+    const artifact = attachedArtifact || moduleArtifact;
+    const hasContent = inputValue.trim() || artifact;
     if (!hasContent || status !== "ready") return;
     setShowSuggestions(false);
 
@@ -276,13 +283,14 @@ function AISearchContent() {
     let messageText = inputValue.trim();
 
     // If there's an artifact, include it in the message
-    if (attachedArtifact) {
-      const artifactSection = `\n\n<attached-file filename="${attachedArtifact.filename}">\n${attachedArtifact.content}\n</attached-file>`;
+    if (artifact) {
+      const artifactSection = `\n\n<attached-file filename="${artifact.filename}">\n${artifact.content}\n</attached-file>`;
       messageText = messageText ? `${messageText}${artifactSection}` : `Here's the content I'd like you to analyze:${artifactSection}`;
     }
 
     sendMessage({ parts: [{ type: "text", text: messageText }] });
     setInputValue("");
+    moduleArtifact = null;
     setAttachedArtifact(null);
   };
 
@@ -377,6 +385,25 @@ function AISearchContent() {
       .filter((part): part is TextPart => part.type === "text")
       .map((part) => part.text)
       .join("");
+  };
+
+  // Parse user message to separate regular text from attached files
+  const parseUserMessage = (text: string): { regularText: string; attachedFile: { filename: string; content: string } | null } => {
+    const attachedFileRegex = /<attached-file filename="([^"]+)">\n?([\s\S]*?)\n?<\/attached-file>/;
+    const match = text.match(attachedFileRegex);
+
+    if (match) {
+      const regularText = text.replace(attachedFileRegex, '').replace(/Here's the content I'd like you to analyze:\s*$/, '').trim();
+      return {
+        regularText,
+        attachedFile: {
+          filename: match[1],
+          content: match[2],
+        },
+      };
+    }
+
+    return { regularText: text, attachedFile: null };
   };
 
   // Extract tool name from type (e.g., "tool-searchGitHubProfiles" -> "searchGitHubProfiles")
@@ -1078,454 +1105,468 @@ function AISearchContent() {
 
   return (
     <AppLayout user={user}>
-    <div className={`relative flex-1 flex flex-col overflow-hidden min-h-0 transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
-      {/* Background effects */}
-      <div className="absolute inset-0 grid-bg" />
-      <div className="absolute inset-0 noise-overlay pointer-events-none" />
+      <div className={`relative flex-1 flex flex-col overflow-hidden min-h-0 transition-colors duration-500 ${roastMode ? 'bg-zinc-950' : 'bg-background'}`}>
+        {/* Background effects */}
+        <div className="absolute inset-0 grid-bg" />
+        <div className="absolute inset-0 noise-overlay pointer-events-none" />
 
-      {/* Roast mode flame gradient from bottom */}
-      {roastMode && (
-        <div className="absolute inset-0 bg-gradient-to-t from-red-950/40 via-orange-950/20 via-40% to-transparent pointer-events-none" />
-      )}
+        {/* Roast mode flame gradient from bottom */}
+        {roastMode && (
+          <div className="absolute inset-0 bg-gradient-to-t from-red-950/40 via-orange-950/20 via-40% to-transparent pointer-events-none" />
+        )}
 
-      {/* Animated gradient orbs */}
-      <div className={`absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'opacity-0' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
-      <div className={`absolute top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'opacity-0' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
+        {/* Animated gradient orbs */}
+        <div className={`absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full blur-3xl transition-all duration-700 ${roastMode ? 'opacity-0' : 'bg-emerald-600/20 animate-pulse-glow'}`} />
+        <div className={`absolute top-[20%] right-[-5%] w-[500px] h-[500px] rounded-full blur-3xl transition-all duration-700 delay-200 ${roastMode ? 'opacity-0' : 'bg-cyan-500/15 animate-pulse-glow'}`} />
 
-      {/* Main Chat Area */}
-      <main className="relative z-10 flex-1 flex flex-col min-h-0">
-        {/* Messages */}
-        <StickToBottom className="flex-1 relative overflow-auto" resize="smooth" initial="smooth">
-          <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent container mx-auto px-4 md:px-6 pt-8 pb-8 max-w-4xl">
-          {messages.length === 0 && (
-            <div className="text-center py-16">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-              >
-                {roastMode ? (
-                  <div className="relative">
-                    <GitRoastLogo className="h-16 w-16 mx-auto mb-4 animate-pulse" />
-                    <motion.span
-                      animate={{ y: [0, -5, 0] }}
-                      transition={{ duration: 0.5, repeat: Infinity }}
-                      className="absolute -top-2 -right-2 text-2xl"
-                    >
-                      🔥
-                    </motion.span>
-                  </div>
-                ) : (
-                  <GitRadarLogoWave className="h-16 w-16 mx-auto mb-4 text-emerald-400/50" />
-                )}
-              </motion.div>
-              <motion.p
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.2 }}
-                className={`mb-6 ${roastMode ? 'text-red-400/80' : 'text-muted-foreground'}`}
-              >
-                {roastMode
-                  ? "Ready to absolutely demolish some GitHub profiles? Let's see who's been committing crimes against code. 💀"
-                  : "Ask me to find developers with specific skills, in certain locations, or working on particular technologies."}
-              </motion.p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {(roastMode
-                  ? [
-                      "Roast @torvalds",
-                      "Roast my profile",
-                      "Roast a React dev",
-                    ]
-                  : [
-                      "Rust devs in Sydney",
-                      "React engineers",
-                      "ML experts in Europe",
-                    ]
-                ).map((suggestion, index) => (
-                  <motion.button
-                    key={suggestion}
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: 0.3 + index * 0.1 }}
-                    onClick={() => setInputValue(suggestion)}
-                    className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${
-                      roastMode
-                        ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
-                        : 'bg-white/5 border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white'
-                    }`}
+        {/* Main Chat Area */}
+        <main className="relative z-10 flex-1 flex flex-col min-h-0">
+          {/* Messages */}
+          <StickToBottom className="flex-1 relative overflow-auto" resize="smooth" initial="smooth">
+            <StickToBottom.Content className="flex flex-col gap-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent container mx-auto px-4 md:px-6 pt-8 pb-8 max-w-4xl">
+              {messages.length === 0 && (
+                <div className="text-center py-16">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
                   >
-                    {suggestion}
-                  </motion.button>
-                ))}
-              </div>
-
-              {/* Recent Searches Section */}
-              {!roastMode && !loadingRecent && recentSearches.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.7 }}
-                  className="mt-12 text-left max-w-2xl mx-auto"
-                >
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-                    <Clock className="h-4 w-4" />
-                    <span>Recently Viewed Profiles</span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {recentSearches.slice(0, 4).map((search, index) => (
-                        <motion.div
-                          key={search.id}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.3, delay: 0.8 + index * 0.05 }}
+                    {roastMode ? (
+                      <div className="relative">
+                        <GitRoastLogo className="h-16 w-16 mx-auto mb-4 animate-pulse" />
+                        <motion.span
+                          animate={{ y: [0, -5, 0] }}
+                          transition={{ duration: 0.5, repeat: Infinity }}
+                          className="absolute -top-2 -right-2 text-2xl"
                         >
-                          <Link
-                            href={`/analyze/${search.githubUsername}`}
-                            className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                          🔥
+                        </motion.span>
+                      </div>
+                    ) : (
+                      <GitRadarLogoWave className="h-16 w-16 mx-auto mb-4 text-emerald-400/50" />
+                    )}
+                  </motion.div>
+                  <motion.p
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.2 }}
+                    className={`mb-6 ${roastMode ? 'text-red-400/80' : 'text-muted-foreground'}`}
+                  >
+                    {roastMode
+                      ? "Ready to absolutely demolish some GitHub profiles? Let's see who's been committing crimes against code. 💀"
+                      : "Ask me to find developers with specific skills, in certain locations, or working on particular technologies."}
+                  </motion.p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {(roastMode
+                      ? [
+                        "Roast @torvalds",
+                        "Roast my profile",
+                        "Roast a React dev",
+                      ]
+                      : [
+                        "Rust devs in Sydney",
+                        "React engineers",
+                        "ML experts in Europe",
+                      ]
+                    ).map((suggestion, index) => (
+                      <motion.button
+                        key={suggestion}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.3 + index * 0.1 }}
+                        onClick={() => setInputValue(suggestion)}
+                        className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${roastMode
+                            ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                            : 'bg-white/5 border-white/10 text-muted-foreground hover:bg-white/10 hover:text-white'
+                          }`}
+                      >
+                        {suggestion}
+                      </motion.button>
+                    ))}
+                  </div>
+
+                  {/* Recent Searches Section */}
+                  {!roastMode && !loadingRecent && recentSearches.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5, delay: 0.7 }}
+                      className="mt-12 text-left max-w-2xl mx-auto"
+                    >
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                        <Clock className="h-4 w-4" />
+                        <span>Recently Viewed Profiles</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {recentSearches.slice(0, 4).map((search, index) => (
+                          <motion.div
+                            key={search.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: 0.8 + index * 0.05 }}
                           >
-                            <img
-                              src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
-                              alt={search.githubUsername}
-                              className="w-10 h-10 rounded-full border border-white/20"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-white truncate">
-                                  {search.githubName || search.githubUsername}
-                                </span>
-                                <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <Link
+                              href={`/analyze/${search.githubUsername}`}
+                              className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors group"
+                            >
+                              <img
+                                src={search.githubAvatarUrl || `https://github.com/${search.githubUsername}.png`}
+                                alt={search.githubUsername}
+                                className="w-10 h-10 rounded-full border border-white/20"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-white truncate">
+                                    {search.githubName || search.githubUsername}
+                                  </span>
+                                  <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </div>
+                                <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
+                                {search.githubLocation && (
+                                  <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                                    <MapPin className="h-3 w-3" />
+                                    <span className="truncate">{search.githubLocation}</span>
+                                  </div>
+                                )}
                               </div>
-                              <span className="text-xs text-muted-foreground">@{search.githubUsername}</span>
-                              {search.githubLocation && (
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                                  <MapPin className="h-3 w-3" />
-                                  <span className="truncate">{search.githubLocation}</span>
+                            </Link>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+
+              <AnimatePresence mode="popLayout">
+                {(messages as unknown as ChatMessage[]).map((message) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                    className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"
+                      }`}
+                  >
+                    <div
+                      className={`max-w-[80%] ${message.role === "user"
+                        ? "bg-emerald-600/20 border border-emerald-500/30 rounded-2xl rounded-tr-md px-4 py-3"
+                        : "space-y-3"
+                        }`}
+                    >
+                      {message.role === "user" ? (
+                        (() => {
+                          const { regularText, attachedFile } = parseUserMessage(getMessageText(message));
+                          return (
+                            <div className="space-y-2">
+                              {regularText && <p className="text-white">{regularText}</p>}
+                              {attachedFile && (
+                                <div className="bg-white/10 border border-white/20 rounded-lg p-2">
+                                  <div className="flex items-center gap-2 text-xs text-emerald-300 mb-1">
+                                    <Paperclip className="h-3 w-3" />
+                                    <span>{attachedFile.filename}</span>
+                                    <span className="text-white/50">({attachedFile.content.length.toLocaleString()} chars)</span>
+                                  </div>
+                                  <pre className="text-xs text-white/70 max-h-20 overflow-hidden whitespace-pre-wrap font-mono">
+                                    {attachedFile.content.slice(0, 200)}{attachedFile.content.length > 200 ? '...' : ''}
+                                  </pre>
                                 </div>
                               )}
                             </div>
-                          </Link>
-                    </motion.div>
+                          );
+                        })()
+                      ) : (
+                        <>
+                          {/* Render parts in original order */}
+                          {message.parts.map((part, i, allParts) => {
+                            // Check if there's a following tool part after this one
+                            const hasFollowingTool = allParts.slice(i + 1).some(p => p.type.startsWith("tool-"));
+                            // Reasoning parts - only show while thinking
+                            if (part.type === "reasoning") {
+                              const reasoningPart = part as ReasoningPart;
+                              if (reasoningPart.state !== "thinking") return null;
+                              return (
+                                <div
+                                  key={`reasoning-${i}`}
+                                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                                >
+                                  <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+                                  <span className="truncate">{reasoningPart.text}</span>
+                                </div>
+                              );
+                            }
+
+                            // Tool invocations
+                            if (part.type.startsWith("tool-")) {
+                              const toolPart = part as ToolPart;
+                              const toolName = getToolName(toolPart.type);
+                              const hasResult = toolPart.state === "result" || toolPart.state === "output-available";
+                              const toolResult = toolPart.output ?? toolPart.result;
+
+                              // For analyzeGitHubRepository and deepWebSearch, check preliminary FIRST before hasResult
+                              const isPreliminaryRepo = toolName === "analyzeGitHubRepository" && toolPart.preliminary;
+                              const isPreliminarySearch = toolName === "deepWebSearch" && toolPart.preliminary;
+                              const isPreliminary = isPreliminaryRepo || isPreliminarySearch;
+                              const showFinalResult = hasResult && !isPreliminary;
+
+                              return (
+                                <div key={`tool-${i}`} className="space-y-2">
+                                  {isPreliminaryRepo && toolResult ? (
+                                    // Show streaming progress for repo analysis
+                                    <RepoAnalysisProgress progress={toolResult as AnalysisProgress} />
+                                  ) : isPreliminarySearch && toolResult ? (
+                                    // Show streaming progress for deep web search
+                                    <SearchAgentProgress progress={toolResult as SearchProgress} />
+                                  ) : showFinalResult ? (
+                                    <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch" && toolName !== "linkedinSearch" && toolName !== "linkedinProfile"} hasFollowingTool={hasFollowingTool}>
+                                      {toolResult != null && renderToolResult(toolName, toolResult)}
+                                    </CollapsibleToolResult>
+                                  ) : toolName === "analyzeGitHubRepository" ? (
+                                    // Fallback skeleton for repo analysis
+                                    <RepoAnalysisSkeleton />
+                                  ) : toolName === "deepWebSearch" ? (
+                                    // Fallback skeleton for deep web search
+                                    <SearchAgentSkeleton />
+                                  ) : (
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span>
+                                        {toolName === "searchGitHubProfiles"
+                                          ? `Searching for "${(toolPart.input as { query?: string })?.query || 'profiles'}"...`
+                                          : toolName === "searchGitHubUsers"
+                                            ? `Searching GitHub users for "${(toolPart.input as { query?: string })?.query || 'users'}"...`
+                                            : toolName === "getTopCandidates"
+                                              ? `Ranking ${(toolPart.input as { usernames?: string[] })?.usernames?.length || 0} candidates...`
+                                              : toolName === "generateDraftEmail"
+                                                ? `Drafting email for ${(toolPart.input as { candidateName?: string })?.candidateName || 'candidate'}...`
+                                                : toolName === "webSearch"
+                                                  ? `Searching the web for "${(toolPart.input as { query?: string })?.query || 'information'}"...`
+                                                  : toolName === "scrapeUrls"
+                                                    ? `Scraping ${(toolPart.input as { urls?: string[] })?.urls?.length || ''} URL${((toolPart.input as { urls?: string[] })?.urls?.length || 0) !== 1 ? 's' : ''}...`
+                                                    : toolName === "linkedinSearch"
+                                                      ? `Searching LinkedIn profiles...`
+                                                      : toolName === "linkedinProfile"
+                                                        ? `Fetching LinkedIn profile for ${(toolPart.input as { profileUrlOrUsername?: string })?.profileUrlOrUsername || 'user'}...`
+                                                        : `Analyzing ${(toolPart.input as { username?: string })?.username || 'profile'}...`}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            // Text content
+                            if (part.type === "text") {
+                              const textPart = part as TextPart;
+                              if (!textPart.text) return null;
+                              return (
+                                <div key={`text-${i}`} className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
+                                  <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
+                                    <ReactMarkdown
+                                      components={{
+                                        table: ({ children }) => (
+                                          <div className="overflow-x-auto my-4">
+                                            <table className="w-full border-collapse border border-white/20 text-sm">
+                                              {children}
+                                            </table>
+                                          </div>
+                                        ),
+                                        thead: ({ children }) => (
+                                          <thead className="bg-white/10">{children}</thead>
+                                        ),
+                                        th: ({ children }) => (
+                                          <th className="border border-white/20 px-3 py-2 text-left font-semibold text-white">
+                                            {children}
+                                          </th>
+                                        ),
+                                        td: ({ children }) => (
+                                          <td className="border border-white/20 px-3 py-2 text-white/90">
+                                            {children}
+                                          </td>
+                                        ),
+                                        tr: ({ children }) => (
+                                          <tr className="hover:bg-white/5 transition-colors">{children}</tr>
+                                        ),
+                                      }}
+                                    >
+                                      {textPart.text}
+                                    </ReactMarkdown>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            // Skip other part types (step-start, etc.)
+                            return null;
+                          })}
+                        </>
+                      )}
+                    </div>
+                    {/* Per-message debug button - Dev only */}
+                    {isDev && (
+                      <button
+                        onClick={() => setDebugMessageId(debugMessageId === message.id ? null : message.id)}
+                        className="flex-shrink-0 self-start p-1 rounded text-yellow-500/50 hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+                        title="Debug this message"
+                      >
+                        <Bug className="h-3 w-3" />
+                      </button>
+                    )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {isLoading && messages[messages.length - 1]?.role === "user" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="flex gap-3"
+                >
+                  <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                  </div>
+                </motion.div>
+              )}
+
+            </StickToBottom.Content>
+            <ScrollToBottomButton />
+          </StickToBottom>
+
+          {/* Input Form */}
+          <motion.form
+            id="chat-form"
+            onSubmit={handleSubmit}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+            className={`relative sticky bottom-4 backdrop-blur-xl rounded-2xl border p-2 transition-all duration-500 container mx-auto px-4 md:px-6 max-w-4xl ${roastMode
+                ? 'bg-zinc-900/90 border-red-500/30 shadow-lg shadow-red-500/10'
+                : 'bg-background/80 border-white/10'
+              }`}
+          >
+            {/* Autocomplete suggestions dropdown */}
+            <AnimatePresence>
+              {showSuggestions && suggestions.length > 0 && (
+                <motion.div
+                  ref={suggestionsRef}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute bottom-full left-0 right-0 mb-2 mx-2 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden shadow-xl"
+                >
+                  <div className="p-1">
+                    <div className="px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Github className="h-3 w-3" />
+                      <span>GitHub Users</span>
+                      <span className="ml-auto text-[10px] opacity-60">Tab to select</span>
+                    </div>
+                    {suggestions.map((user, index) => (
+                      <button
+                        key={user.login}
+                        type="button"
+                        onClick={() => applySuggestion(user.login)}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${index === selectedSuggestionIndex
+                            ? 'bg-emerald-500/20 text-white'
+                            : 'hover:bg-white/5 text-white/80'
+                          }`}
+                      >
+                        <img
+                          src={user.avatar_url}
+                          alt={user.login}
+                          className="w-7 h-7 rounded-full border border-white/20"
+                        />
+                        <div className="flex-1 text-left min-w-0">
+                          <div className="font-medium text-sm truncate">@{user.login}</div>
+                          {user.name && (
+                            <div className="text-xs text-muted-foreground truncate">{user.name}</div>
+                          )}
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </motion.div>
               )}
-            </div>
-          )}
+            </AnimatePresence>
 
-          <AnimatePresence mode="popLayout">
-          {(messages as unknown as ChatMessage[]).map((message) => (
-            <motion.div
-              key={message.id}
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-              className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-            >
-              <div
-                className={`max-w-[80%] ${message.role === "user"
-                    ? "bg-emerald-600/20 border border-emerald-500/30 rounded-2xl rounded-tr-md px-4 py-3"
-                    : "space-y-3"
+            {/* Attached artifact preview */}
+            <AnimatePresence>
+              {attachedArtifact && (
+                <div className="px-2 pb-2">
+                  <TextArtifactPreview
+                    content={attachedArtifact.content}
+                    filename={attachedArtifact.filename}
+                    onRemove={() => setAttachedArtifact(null)}
+                  />
+                </div>
+              )}
+            </AnimatePresence>
+
+            <div className="flex gap-2 items-center">
+              <Input
+                ref={inputRef}
+                value={inputValue}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder={roastMode ? "Who's getting roasted today? 🔥" : attachedArtifact ? "Add a message about the attached file..." : "Ask me to find developers... (type @ for users)"}
+                className={`flex-1 h-12 bg-transparent border-0 focus:ring-0 focus-visible:ring-0 text-white transition-colors duration-300 ${roastMode ? 'placeholder:text-red-400/60' : 'placeholder:text-muted-foreground'
+                  }`}
+                disabled={isLoading}
+              />
+              <Button
+                type="submit"
+                disabled={isLoading || (!inputValue.trim() && !attachedArtifact)}
+                className={`h-12 w-12 transition-all duration-300 ${roastMode
+                    ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400'
+                    : 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500'
                   }`}
               >
-                {message.role === "user" ? (
-                  <p className="text-white">{getMessageText(message)}</p>
+                {isLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : roastMode ? (
+                  <Flame className="h-5 w-5" />
+                ) : attachedArtifact ? (
+                  <Paperclip className="h-5 w-5" />
                 ) : (
-                  <>
-                    {/* Render parts in original order */}
-                    {message.parts.map((part, i, allParts) => {
-                      // Check if there's a following tool part after this one
-                      const hasFollowingTool = allParts.slice(i + 1).some(p => p.type.startsWith("tool-"));
-                      // Reasoning parts - only show while thinking
-                      if (part.type === "reasoning") {
-                        const reasoningPart = part as ReasoningPart;
-                        if (reasoningPart.state !== "thinking") return null;
-                        return (
-                          <div
-                            key={`reasoning-${i}`}
-                            className="flex items-center gap-2 text-xs text-muted-foreground"
-                          >
-                            <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
-                            <span className="truncate">{reasoningPart.text}</span>
-                          </div>
-                        );
-                      }
-
-                      // Tool invocations
-                      if (part.type.startsWith("tool-")) {
-                        const toolPart = part as ToolPart;
-                        const toolName = getToolName(toolPart.type);
-                        const hasResult = toolPart.state === "result" || toolPart.state === "output-available";
-                        const toolResult = toolPart.output ?? toolPart.result;
-
-                        // For analyzeGitHubRepository and deepWebSearch, check preliminary FIRST before hasResult
-                        const isPreliminaryRepo = toolName === "analyzeGitHubRepository" && toolPart.preliminary;
-                        const isPreliminarySearch = toolName === "deepWebSearch" && toolPart.preliminary;
-                        const isPreliminary = isPreliminaryRepo || isPreliminarySearch;
-                        const showFinalResult = hasResult && !isPreliminary;
-
-                        return (
-                          <div key={`tool-${i}`} className="space-y-2">
-                            {isPreliminaryRepo && toolResult ? (
-                              // Show streaming progress for repo analysis
-                              <RepoAnalysisProgress progress={toolResult as AnalysisProgress} />
-                            ) : isPreliminarySearch && toolResult ? (
-                              // Show streaming progress for deep web search
-                              <SearchAgentProgress progress={toolResult as SearchProgress} />
-                            ) : showFinalResult ? (
-                              <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch" && toolName !== "linkedinSearch" && toolName !== "linkedinProfile"} hasFollowingTool={hasFollowingTool}>
-                                {toolResult != null && renderToolResult(toolName, toolResult)}
-                              </CollapsibleToolResult>
-                            ) : toolName === "analyzeGitHubRepository" ? (
-                              // Fallback skeleton for repo analysis
-                              <RepoAnalysisSkeleton />
-                            ) : toolName === "deepWebSearch" ? (
-                              // Fallback skeleton for deep web search
-                              <SearchAgentSkeleton />
-                            ) : (
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>
-                                  {toolName === "searchGitHubProfiles"
-                                    ? `Searching for "${(toolPart.input as { query?: string })?.query || 'profiles'}"...`
-                                    : toolName === "searchGitHubUsers"
-                                    ? `Searching GitHub users for "${(toolPart.input as { query?: string })?.query || 'users'}"...`
-                                    : toolName === "getTopCandidates"
-                                    ? `Ranking ${(toolPart.input as { usernames?: string[] })?.usernames?.length || 0} candidates...`
-                                    : toolName === "generateDraftEmail"
-                                    ? `Drafting email for ${(toolPart.input as { candidateName?: string })?.candidateName || 'candidate'}...`
-                                    : toolName === "webSearch"
-                                    ? `Searching the web for "${(toolPart.input as { query?: string })?.query || 'information'}"...`
-                                    : toolName === "scrapeUrls"
-                                    ? `Scraping ${(toolPart.input as { urls?: string[] })?.urls?.length || ''} URL${((toolPart.input as { urls?: string[] })?.urls?.length || 0) !== 1 ? 's' : ''}...`
-                                    : toolName === "linkedinSearch"
-                                    ? `Searching LinkedIn profiles...`
-                                    : toolName === "linkedinProfile"
-                                    ? `Fetching LinkedIn profile for ${(toolPart.input as { profileUrlOrUsername?: string })?.profileUrlOrUsername || 'user'}...`
-                                    : `Analyzing ${(toolPart.input as { username?: string })?.username || 'profile'}...`}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
-
-                      // Text content
-                      if (part.type === "text") {
-                        const textPart = part as TextPart;
-                        if (!textPart.text) return null;
-                        return (
-                          <div key={`text-${i}`} className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
-                            <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
-                              <ReactMarkdown
-                                components={{
-                                  table: ({ children }) => (
-                                    <div className="overflow-x-auto my-4">
-                                      <table className="w-full border-collapse border border-white/20 text-sm">
-                                        {children}
-                                      </table>
-                                    </div>
-                                  ),
-                                  thead: ({ children }) => (
-                                    <thead className="bg-white/10">{children}</thead>
-                                  ),
-                                  th: ({ children }) => (
-                                    <th className="border border-white/20 px-3 py-2 text-left font-semibold text-white">
-                                      {children}
-                                    </th>
-                                  ),
-                                  td: ({ children }) => (
-                                    <td className="border border-white/20 px-3 py-2 text-white/90">
-                                      {children}
-                                    </td>
-                                  ),
-                                  tr: ({ children }) => (
-                                    <tr className="hover:bg-white/5 transition-colors">{children}</tr>
-                                  ),
-                                }}
-                              >
-                                {textPart.text}
-                              </ReactMarkdown>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // Skip other part types (step-start, etc.)
-                      return null;
-                    })}
-                  </>
+                  <Send className="h-5 w-5" />
                 )}
-              </div>
-              {/* Per-message debug button - Dev only */}
-              {isDev && (
+              </Button>
+            </div>
+          </motion.form>
+        </main>
+
+        {/* Debug Modal - Dev only */}
+        {isDev && debugMessageId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDebugMessageId(null)}>
+            <div className="relative w-full max-w-4xl max-h-[80vh] m-4 bg-zinc-900 border border-white/10 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b border-white/10">
+                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Bug className="h-5 w-5 text-yellow-400" />
+                  Debug: Message Parts
+                </h2>
                 <button
-                  onClick={() => setDebugMessageId(debugMessageId === message.id ? null : message.id)}
-                  className="flex-shrink-0 self-start p-1 rounded text-yellow-500/50 hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
-                  title="Debug this message"
+                  onClick={() => setDebugMessageId(null)}
+                  className="p-1 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
                 >
-                  <Bug className="h-3 w-3" />
+                  <X className="h-5 w-5" />
                 </button>
-              )}
-            </motion.div>
-          ))}
-          </AnimatePresence>
-
-          {isLoading && messages[messages.length - 1]?.role === "user" && (
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
-              className="flex gap-3"
-            >
-              <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
-                <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
               </div>
-            </motion.div>
-          )}
-
-        </StickToBottom.Content>
-          <ScrollToBottomButton />
-        </StickToBottom>
-
-        {/* Input Form */}
-        <motion.form
-          id="chat-form"
-          onSubmit={handleSubmit}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-          className={`relative sticky bottom-4 backdrop-blur-xl rounded-2xl border p-2 transition-all duration-500 container mx-auto px-4 md:px-6 max-w-4xl ${
-            roastMode
-              ? 'bg-zinc-900/90 border-red-500/30 shadow-lg shadow-red-500/10'
-              : 'bg-background/80 border-white/10'
-          }`}
-        >
-          {/* Autocomplete suggestions dropdown */}
-          <AnimatePresence>
-            {showSuggestions && suggestions.length > 0 && (
-              <motion.div
-                ref={suggestionsRef}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                transition={{ duration: 0.15 }}
-                className="absolute bottom-full left-0 right-0 mb-2 mx-2 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden shadow-xl"
-              >
-                <div className="p-1">
-                  <div className="px-3 py-1.5 text-xs text-muted-foreground flex items-center gap-1.5">
-                    <Github className="h-3 w-3" />
-                    <span>GitHub Users</span>
-                    <span className="ml-auto text-[10px] opacity-60">Tab to select</span>
-                  </div>
-                  {suggestions.map((user, index) => (
-                    <button
-                      key={user.login}
-                      type="button"
-                      onClick={() => applySuggestion(user.login)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                        index === selectedSuggestionIndex
-                          ? 'bg-emerald-500/20 text-white'
-                          : 'hover:bg-white/5 text-white/80'
-                      }`}
-                    >
-                      <img
-                        src={user.avatar_url}
-                        alt={user.login}
-                        className="w-7 h-7 rounded-full border border-white/20"
-                      />
-                      <div className="flex-1 text-left min-w-0">
-                        <div className="font-medium text-sm truncate">@{user.login}</div>
-                        {user.name && (
-                          <div className="text-xs text-muted-foreground truncate">{user.name}</div>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Attached artifact preview */}
-          <AnimatePresence>
-            {attachedArtifact && (
-              <div className="px-2 pb-2">
-                <TextArtifactPreview
-                  content={attachedArtifact.content}
-                  filename={attachedArtifact.filename}
-                  onRemove={() => setAttachedArtifact(null)}
-                />
+              <div className="p-4 overflow-auto max-h-[calc(80vh-60px)] custom-scrollbar">
+                <pre className="text-xs text-emerald-300 whitespace-pre-wrap font-mono">
+                  {JSON.stringify(
+                    messages.find((m) => m.id === debugMessageId),
+                    null,
+                    2
+                  )}
+                </pre>
               </div>
-            )}
-          </AnimatePresence>
-
-          <div className="flex gap-2 items-center">
-            <Input
-              ref={inputRef}
-              value={inputValue}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder={roastMode ? "Who's getting roasted today? 🔥" : attachedArtifact ? "Add a message about the attached file..." : "Ask me to find developers... (type @ for users)"}
-              className={`flex-1 h-12 bg-transparent border-0 focus:ring-0 focus-visible:ring-0 text-white transition-colors duration-300 ${
-                roastMode ? 'placeholder:text-red-400/60' : 'placeholder:text-muted-foreground'
-              }`}
-              disabled={isLoading}
-            />
-            <Button
-              type="submit"
-              disabled={isLoading || (!inputValue.trim() && !attachedArtifact)}
-              className={`h-12 w-12 transition-all duration-300 ${
-                roastMode
-                  ? 'bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400'
-                  : 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500'
-              }`}
-            >
-              {isLoading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : roastMode ? (
-                <Flame className="h-5 w-5" />
-              ) : attachedArtifact ? (
-                <Paperclip className="h-5 w-5" />
-              ) : (
-                <Send className="h-5 w-5" />
-              )}
-            </Button>
-          </div>
-        </motion.form>
-      </main>
-
-      {/* Debug Modal - Dev only */}
-      {isDev && debugMessageId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDebugMessageId(null)}>
-          <div className="relative w-full max-w-4xl max-h-[80vh] m-4 bg-zinc-900 border border-white/10 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-white/10">
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Bug className="h-5 w-5 text-yellow-400" />
-                Debug: Message Parts
-              </h2>
-              <button
-                onClick={() => setDebugMessageId(null)}
-                className="p-1 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-4 overflow-auto max-h-[calc(80vh-60px)] custom-scrollbar">
-              <pre className="text-xs text-emerald-300 whitespace-pre-wrap font-mono">
-                {JSON.stringify(
-                  messages.find((m) => m.id === debugMessageId),
-                  null,
-                  2
-                )}
-              </pre>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
     </AppLayout>
   );
 }

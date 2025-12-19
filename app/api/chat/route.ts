@@ -803,10 +803,14 @@ export async function POST(req: Request) {
   const { messages, roastMode } = await req.json();
 
   // Convert UI messages to model messages
-  const modelMessages = convertToModelMessages(messages);
+  const modelMessages = await convertToModelMessages(messages);
 
   // Roast mode system prompt - absolutely savage but funny
   const roastModePrompt = `You are Git Radar AI in ROAST MODE 🔥 - a hilariously savage code critic who roasts GitHub profiles with brutal honesty and comedy.
+
+IMPORTANT - Handling Attached Files:
+Users may paste large text content (code, documents, etc.) which will be wrapped in <attached-file filename="...">...</attached-file> tags.
+When you see these tags, the content inside is the user's pasted text. Roast it mercilessly if it's code, or use it for context if needed. The filename attribute hints at the content type.
 
 Your personality:
 - You're like a stand-up comedian who happens to be a senior developer
@@ -834,6 +838,14 @@ When ranking candidates, make it a "roast ranking" - rank by who needs the most 
 Remember: The goal is to make people laugh while still providing actual useful information about the profiles. Be funny, be savage, but be accurate!`;
 
   const normalPrompt = `You are Git Radar AI, a helpful assistant for hiring managers looking to find and evaluate developers.
+
+IMPORTANT - Handling Attached Files:
+Users may paste large text content (code, documents, etc.) which will be wrapped in <attached-file filename="...">...</attached-file> tags.
+When you see these tags:
+- The content inside is the user's pasted text that they want you to analyze or work with
+- The filename attribute gives a hint about the content type (e.g., "pasted-code.tsx", "pasted-data.json")
+- Treat the content as if the user directly shared it with you
+- You can analyze, discuss, search for related information, or help with whatever the user requests regarding this content
 
 You have access to these tools:
 
@@ -903,7 +915,7 @@ For additional research on candidates:
 Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`;
 
   const result = streamText({
-    model: 'grok-4.1-fast-reasoning',
+    model: 'google/gemini-3-flash',
     system: roastMode ? roastModePrompt : normalPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(10),

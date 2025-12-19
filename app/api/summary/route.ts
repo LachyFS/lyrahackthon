@@ -150,7 +150,7 @@ Write a **recruiter-focused summary** in markdown format that helps hiring manag
 Keep it concise, actionable, and evidence-based. Use **bold** for emphasis on key points. Don't be generic - reference specific technologies, projects, or patterns you see in the data.`;
 
   const result = streamText({
-    model: "xai/grok-4.1-fast-reasoning",
+    model: "xai/google/gemini-3-flash",
     prompt,
     maxTokens: 600,
   });

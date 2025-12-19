@@ -782,7 +782,7 @@ After gathering information, provide your complete structured analysis as a JSON
     };
 
     const result = streamText({
-      model: "xai/grok-4.1-fast-reasoning" as Parameters<typeof streamText>[0]["model"],
+      model: "xai/google/gemini-3-flash" as Parameters<typeof streamText>[0]["model"],
       system: systemPrompt,
       prompt: `Analyze this repository thoroughly. Use the bash tool to explore the codebase and gather information.
 
