@@ -9,7 +9,6 @@ import {
   Zap,
   BarChart3,
   Brain,
-  Shield,
   ArrowRight,
   CheckCircle,
   TrendingUp,
@@ -39,6 +38,7 @@ export default async function Home() {
       <SiteHeader
         navLinks={[
           { href: "/ai-search", label: "AI Chat" },
+          { href: "/sonar", label: "Sonar" },
           { href: "/ai-search?roast=true", label: "Roast" },
           { href: "#features", label: "Features" },
           { href: "#how-it-works", label: "How it works" },
@@ -65,8 +65,8 @@ export default async function Home() {
 
             {/* Subheading */}
             <p className="animate-slide-up opacity-0 delay-200 text-lg md:text-xl text-muted-foreground max-w-2xl mb-10">
-              Git Radar turns GitHub into your talent pipeline. Search by skills, location,
-              or activity—and get instant AI analysis of any developer&apos;s profile.
+              AI-powered developer sourcing from GitHub. Chat with our AI to find candidates,
+              get deep profile analysis, or set up Sonar to automatically discover matching talent.
             </p>
 
             {/* Search Form */}
@@ -141,10 +141,10 @@ export default async function Home() {
               Features
             </Badge>
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Source talent from GitHub at scale
+              Everything you need to source developers
             </h2>
             <p className="text-muted-foreground">
-              Discover developers by their actual work. Filter, analyze, and shortlist—all from real GitHub data.
+              From AI chat to automated searches, Git Radar gives you the tools to find and evaluate developers at scale.
             </p>
           </div>
 
@@ -152,44 +152,44 @@ export default async function Home() {
             {[
               {
                 icon: Brain,
-                title: "AI-Powered Analysis",
+                title: "AI Chat Search",
                 description:
-                  "Instantly summarize a developer's skills, experience level, and strengths from their GitHub activity.",
+                  "Describe who you're looking for in natural language. Our AI searches GitHub and ranks candidates for you.",
                 gradient: "from-emerald-500 to-teal-500",
               },
               {
-                icon: BarChart3,
-                title: "Activity Insights",
+                icon: Search,
+                title: "Sonar Auto-Search",
                 description:
-                  "See commit frequency, contribution patterns, and shipping consistency at a glance.",
+                  "Set up search briefs and let Sonar automatically find matching developers. Get notified when new talent appears.",
                 gradient: "from-cyan-500 to-blue-500",
               },
               {
-                icon: Code2,
-                title: "Tech Stack Detection",
+                icon: BarChart3,
+                title: "Deep Profile Analysis",
                 description:
-                  "Filter by language and framework. Match candidates to your stack requirements automatically.",
+                  "Get detailed breakdowns of any GitHub profile—languages, activity patterns, top repos, and AI-generated insights.",
                 gradient: "from-blue-500 to-indigo-500",
               },
               {
-                icon: TrendingUp,
-                title: "Experience Signals",
+                icon: Users,
+                title: "Collaboration Networks",
                 description:
-                  "Assess seniority from project complexity, code quality, and contribution history.",
+                  "Visualize who developers work with. Discover hidden talent through collaboration graphs.",
                 gradient: "from-purple-500 to-pink-500",
               },
               {
-                icon: Users,
-                title: "Open Source Activity",
+                icon: Code2,
+                title: "Repository Analysis",
                 description:
-                  "Surface developers who contribute to popular projects and collaborate in the open.",
+                  "Analyze any GitHub repo in depth. Understand code quality, architecture, and the tech stack used.",
                 gradient: "from-pink-500 to-rose-500",
               },
               {
-                icon: Shield,
-                title: "Quality Indicators",
+                icon: Zap,
+                title: "Git Roast Mode",
                 description:
-                  "Identify red flags like stale profiles, abandoned projects, or inconsistent activity.",
+                  "Have some fun—get a humorous roast of any developer's GitHub profile. Great for team building.",
                 gradient: "from-orange-500 to-amber-500",
               },
             ].map((feature, i) => (
@@ -231,10 +231,10 @@ export default async function Home() {
                 How it works
               </Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                From GitHub search to candidate shortlist in seconds
+                Three ways to find your next hire
               </h2>
               <p className="text-muted-foreground">
-                Search, analyze, and evaluate developers—all from one place.
+                Whether you need candidates now or want to build a pipeline, we&apos;ve got you covered.
               </p>
             </div>
 
@@ -242,24 +242,24 @@ export default async function Home() {
               {[
                 {
                   step: "01",
-                  title: "Search or Enter a Username",
+                  title: "Chat with AI",
                   description:
-                    "Use AI search to find developers by skills and location, or analyze a specific GitHub profile directly.",
-                  icon: Search,
+                    "Tell our AI what you're looking for—skills, location, experience. It searches GitHub and ranks the best matches.",
+                  icon: Brain,
                 },
                 {
                   step: "02",
-                  title: "We Analyze the Data",
+                  title: "Analyze Profiles",
                   description:
-                    "Git Radar processes repos, commits, contributions, and coding patterns to build a complete picture.",
-                  icon: Zap,
+                    "Enter any GitHub username to get a deep analysis—languages, activity, top repos, collaboration network, and AI insights.",
+                  icon: BarChart3,
                 },
                 {
                   step: "03",
-                  title: "Review and Shortlist",
+                  title: "Set Up Sonar",
                   description:
-                    "Get detailed profiles with skills breakdown, activity metrics, and AI-powered insights.",
-                  icon: BarChart3,
+                    "Create search briefs describing your ideal candidate. Sonar continuously finds new matching developers.",
+                  icon: Search,
                 },
               ].map((item, i) => (
                 <div
@@ -304,10 +304,10 @@ export default async function Home() {
               <div className="absolute bottom-0 right-0 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl" />
 
               <h2 className="relative text-3xl md:text-4xl font-bold mb-4">
-                GitHub is the best talent pool. Start sourcing from it.
+                Stop searching job boards. Start finding real builders.
               </h2>
               <p className="relative text-muted-foreground max-w-xl mx-auto mb-8">
-                Sign in with GitHub for higher API limits, saved searches, and candidate shortlists.
+                Sign in with GitHub to unlock Sonar, save your searches, and get unlimited profile analyses.
               </p>
               <form action={signInWithGitHub} className="relative">
                 <Button

@@ -22,7 +22,7 @@ export type JobExtraction = z.infer<typeof JobExtractionSchema>;
 
 export async function extractJobInfo(description: string): Promise<JobExtraction> {
   const { object } = await generateObject({
-    model: anthropic("claude-3-5-haiku-latest"),
+    model: "google/gemini-3-flash",
     schema: JobExtractionSchema,
     prompt: `Extract structured information from this job posting or developer search description.
 

@@ -135,13 +135,13 @@ export default function SonarPage() {
                   Describe what you need and we&apos;ll find matching developers
                 </p>
               </div>
-              <Button
+              {<Button
                 onClick={() => setDialogOpen(true)}
                 className="bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500"
               >
                 <Plus className="h-4 w-4 mr-2" />
                 New Search
-              </Button>
+              </Button>}
             </motion.div>
 
             {briefs.length === 0 ? (
@@ -152,9 +152,6 @@ export default function SonarPage() {
                 transition={{ duration: 0.4, delay: 0.1 }}
                 className="text-center py-16"
               >
-                <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/5 mb-6">
-                  <Sparkles className="h-10 w-10 text-emerald-400" />
-                </div>
                 <h2 className="text-2xl font-semibold text-white mb-3">
                   Who are you looking for?
                 </h2>

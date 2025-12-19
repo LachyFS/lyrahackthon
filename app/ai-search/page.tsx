@@ -60,6 +60,30 @@ interface TextArtifactData {
 }
 let moduleArtifact: TextArtifactData | null = null;
 
+// Track which usernames we've already prefetched to avoid duplicate calls
+const prefetchedUsernames = new Set<string>();
+
+// Component that prefetches the full analysis in the background when a profile card is shown
+function AnalysisPrefetcher({ username, children }: { username: string; children: React.ReactNode }) {
+  useEffect(() => {
+    // Only prefetch once per username per session
+    if (prefetchedUsernames.has(username.toLowerCase())) {
+      return;
+    }
+    prefetchedUsernames.add(username.toLowerCase());
+
+    // Fire off the prefetch request in the background
+    fetch(`/api/analyze/${encodeURIComponent(username)}`, {
+      method: "GET",
+      credentials: "include",
+    }).catch(() => {
+      // Silently ignore errors - this is just a prefetch optimization
+    });
+  }, [username]);
+
+  return <>{children}</>;
+}
+
 // Types for message parts
 interface TextPart {
   type: "text";
@@ -750,6 +774,7 @@ function AISearchContent() {
       };
 
       return (
+        <AnalysisPrefetcher username={data.username}>
         <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
           {/* Profile Header */}
           <div className="flex items-center gap-4 p-4 border-b border-white/10">
@@ -862,6 +887,7 @@ function AISearchContent() {
             </div>
           )}
         </div>
+        </AnalysisPrefetcher>
       );
     }
 
