@@ -10,13 +10,6 @@ import {
   quickRepoCheck,
   type AnalysisProgress,
 } from "@/lib/actions/repo-analyze";
-import { searchWithProgress, type SearchProgress } from "@/lib/actions/search-agent";
-import {
-  scrapeLinkedInProfile,
-  searchLinkedInProfiles,
-  type LinkedInProfile,
-  type LinkedInSearchOptions,
-} from "@/lib/linkedin";
 import { checkRateLimit } from "@/lib/redis";
 import { checkBotId } from "botid/server";
 import { getGitHubToken } from "@/lib/github-token";
@@ -199,10 +192,10 @@ interface GitHubSocials {
 }
 
 // Exa search tool for finding GitHub profiles
-async function searchGitHubProfiles(query: string, token: string | null) {
+async function searchGitHubProfiles(query: string, token: string | null, numResults: number = 30) {
   try {
     const result = await exa.searchAndContents(query, {
-      numResults: 20,
+      numResults: Math.min(numResults, 30),
       includeDomains: ["github.com"],
       text: { maxCharacters: 500 },
     });
@@ -280,12 +273,16 @@ async function searchGitHubProfiles(query: string, token: string | null) {
   }
 }
 
+// Valid Exa category types
+type ExaCategory = "company" | "research paper" | "news" | "pdf" | "github" | "tweet" | "personal site" | "linkedin profile" | "financial report";
+
 // Exa web search and scrape tool - can search and scrape any URL
 async function webSearchAndScrape(query: string, options?: {
   includeDomains?: string[];
   excludeDomains?: string[];
   numResults?: number;
   type?: "keyword" | "neural" | "auto";
+  category?: ExaCategory;
 }) {
   try {
     const result = await exa.searchAndContents(query, {
@@ -293,6 +290,7 @@ async function webSearchAndScrape(query: string, options?: {
       includeDomains: options?.includeDomains,
       excludeDomains: options?.excludeDomains,
       type: options?.type || "auto",
+      category: options?.category,
       text: { maxCharacters: 2000 },
     });
 
@@ -314,6 +312,68 @@ async function webSearchAndScrape(query: string, options?: {
   }
 }
 
+// Exa people search tool - specialized for finding LinkedIn profiles
+async function searchPeople(query: string, options?: {
+  numResults?: number;
+  type?: "keyword" | "neural" | "auto";
+}) {
+  try {
+    const result = await exa.searchAndContents(query, {
+      numResults: options?.numResults || 20,
+      category: "linkedin profile" as ExaCategory,
+      type: options?.type || "auto",
+      text: { maxCharacters: 1500 },
+    });
+
+    const results = result.results.map((r) => ({
+      url: r.url,
+      title: r.title,
+      content: r.text,
+      publishedDate: r.publishedDate,
+      author: r.author,
+    }));
+
+    return {
+      query,
+      results,
+      total: results.length,
+    };
+  } catch (error) {
+    return { error: `People search failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+// Exa GitHub search tool - specialized for finding GitHub content
+async function searchGitHubExa(query: string, options?: {
+  numResults?: number;
+  type?: "keyword" | "neural" | "auto";
+}) {
+  try {
+    const result = await exa.searchAndContents(query, {
+      numResults: options?.numResults || 20,
+      category: "github" as ExaCategory,
+      type: options?.type || "auto",
+      text: { maxCharacters: 1500 },
+    });
+
+    const results = result.results.map((r) => ({
+      url: r.url,
+      title: r.title,
+      content: r.text,
+      publishedDate: r.publishedDate,
+      author: r.author,
+    }));
+
+    return {
+      query,
+      results,
+      total: results.length,
+    };
+  } catch (error) {
+    return { error: `GitHub search failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 // GitHub User Search API - search users directly via GitHub's search API
 async function searchGitHubUsersAPI(
   query: string,
@@ -330,7 +390,7 @@ async function searchGitHubUsersAPI(
     // Build the search URL with query parameters
     const params = new URLSearchParams({
       q: query,
-      per_page: String(options?.perPage || 20),
+      per_page: String(Math.min(options?.perPage || 30, 100)),
     });
     if (options?.sort) {
       params.append("sort", options.sort);
@@ -359,7 +419,7 @@ async function searchGitHubUsersAPI(
 
     // Fetch additional profile details for each user in parallel
     const usersWithDetails = await Promise.all(
-      data.items.slice(0, options?.perPage || 20).map(async (user: { login: string; id: number; avatar_url: string; html_url: string; type: string }) => {
+      data.items.slice(0, options?.perPage || 30).map(async (user: { login: string; id: number; avatar_url: string; html_url: string; type: string }) => {
         try {
           const profileRes = await fetch(`https://api.github.com/users/${user.login}`, {
             headers,
@@ -524,8 +584,8 @@ async function getTopCandidates(
     // Get GitHub token for authenticated requests
     const token = await getGitHubToken();
 
-    // Analyze all profiles in parallel (limit to 10 to avoid rate limits)
-    const usernamesToAnalyze = usernames.slice(0, 10);
+    // Analyze all profiles in parallel (limit to 20 to get more candidates)
+    const usernamesToAnalyze = usernames.slice(0, 20);
     const profiles = await Promise.all(
       usernamesToAnalyze.map((username) => analyzeGitHubProfileTool(username, token))
     );
@@ -736,7 +796,8 @@ async function getTopCandidates(
       };
     }
 
-    const topCandidates = candidates.slice(0, 5);
+    // Return top 10 candidates for better selection
+    const topCandidates = candidates.slice(0, 10);
 
     // Save discovered profiles to search history (async, don't block response)
     saveToSearchHistory(topCandidates, searchQuery);
@@ -837,7 +898,7 @@ When ranking candidates, make it a "roast ranking" - rank by who needs the most 
 
 Remember: The goal is to make people laugh while still providing actual useful information about the profiles. Be funny, be savage, but be accurate!`;
 
-  const normalPrompt = `You are Git Radar AI, a helpful assistant for hiring managers looking to find and evaluate developers.
+  const normalPrompt = `You are Git Radar AI, a thorough and proactive assistant for hiring managers looking to find and evaluate developers. Your goal is to find as many relevant candidates as possible.
 
 IMPORTANT - Handling Attached Files:
 Users may paste large text content (code, documents, etc.) which will be wrapped in <attached-file filename="...">...</attached-file> tags.
@@ -850,13 +911,13 @@ When you see these tags:
 You have access to these tools:
 
 **GitHub-specific tools:**
-1. **searchGitHubProfiles**: Search for GitHub profiles using Exa AI. Best for natural language queries like "rust developers in Sydney" or "machine learning engineers who contribute to open source". Uses semantic search to find relevant profiles.
+1. **searchGitHubProfiles**: Search for GitHub profiles using Exa AI (returns up to 30 profiles). Best for natural language queries like "rust developers in Sydney" or "machine learning engineers who contribute to open source". Uses semantic search to find relevant profiles.
 
-2. **searchGitHubUsers**: Search GitHub users directly via GitHub's Search API. Best for structured searches with specific filters like location, language, follower count. Supports GitHub qualifiers: 'language:rust location:sydney followers:>100 repos:>10'. Use this when the user wants precise filtering.
+2. **searchGitHubUsers**: Search GitHub users directly via GitHub's Search API (returns up to 30 profiles). Best for structured searches with specific filters like location, language, follower count. Supports GitHub qualifiers: 'language:rust location:sydney followers:>100 repos:>10'. Use this when the user wants precise filtering.
 
 3. **analyzeGitHubProfile**: Get detailed analysis of a specific GitHub user by username.
 
-4. **getTopCandidates**: Rank and score multiple GitHub profiles against a hiring brief. This displays a rich UI card for each candidate showing their score, match reasons, concerns, languages, and top repos.
+4. **getTopCandidates**: Rank and score multiple GitHub profiles against a hiring brief. Analyzes up to 20 profiles and returns the top 10 candidates with match scores, reasons, concerns, languages, and top repos.
 
 5. **analyzeGitHubRepository**: Deep analysis of a specific GitHub repository. Clones the repo into a sandboxed environment and analyzes code quality, git practices, testing, documentation, and technical complexity. Use this when:
    - A user provides a specific repo URL to analyze
@@ -865,25 +926,35 @@ You have access to these tools:
    - NOTE: This takes 1-3 minutes to run as it performs deep analysis.
 
 **General web tools:**
-6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, personal websites, documentation, etc. Can filter to specific domains or exclude domains. Use this to gather additional information about candidates beyond GitHub.
+6. **webSearch**: Search the entire web for any content - articles, blog posts, portfolio sites, personal websites, documentation, etc. Can filter to specific domains, exclude domains, or use specialized categories for targeted searches. Supports categories like 'linkedin profile', 'github', 'company', 'news', 'personal site', 'research paper', etc.
 
-7. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
+7. **searchLinkedInProfiles**: Search for LinkedIn profiles using Exa AI's specialized people category. Best for finding professionals by name, title, company, or skills. Use this to find candidates' LinkedIn profiles for additional context.
 
-8. **deepWebSearch**: Multi-step deep web search with AI analysis. Use this for thorough research that requires:
-   - Scraping multiple pages
-   - AI-synthesized summaries
-   - Key themes and entity extraction
-   - Follow-up suggestions
-   Search types: general, github_profiles, linkedin, portfolio, news, technical.
-   NOTE: Takes 30-60 seconds but provides comprehensive analysis.
+8. **searchGitHubContent**: Search GitHub repositories and content using Exa AI's specialized GitHub category. Returns repos, code, and GitHub pages that match semantically. Great for finding relevant open source projects or code examples.
 
-**LinkedIn tools:**
-9. **linkedinSearch**: Search for LinkedIn profiles by name, job title, company, skills, or location. Returns profile URLs with snippets. Use this to find candidates' professional profiles.
-
-10. **linkedinProfile**: Scrape detailed information from a specific LinkedIn profile URL or username. Returns comprehensive data including work history, education, skills, certifications, and more. Use this after linkedinSearch or when you have a specific profile URL.
+9. **scrapeUrls**: Scrape and extract content from specific URLs. Use this when you have a candidate's personal website, portfolio, blog, or any other URL you want to analyze.
 
 **Outreach tools:**
-11. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
+10. **generateDraftEmail**: Generate a professional outreach email draft for a candidate. Use this when the user wants to reach out to a candidate. The tool renders an editable email draft UI that the user can customize before sending. IMPORTANT: Do NOT repeat the email draft in text after using this tool - the tool UI displays the draft.
+
+## CRITICAL: Be Thorough in Your Searches
+
+When searching for developers, you MUST perform multiple searches to find the best candidates:
+
+1. **ALWAYS do at least 2-3 different searches** using different strategies:
+   - First: Use searchGitHubProfiles with a natural language query (e.g., "senior rust developers in Australia")
+   - Second: Use searchGitHubUsers with GitHub qualifiers (e.g., "language:rust location:australia followers:>50")
+   - Third: Try alternative query variations (e.g., different skill keywords, nearby locations, related technologies)
+
+2. **Combine results from multiple searches** before calling getTopCandidates. Merge all unique usernames found.
+
+3. **Use creative search strategies:**
+   - Search for specific technologies AND related ones (e.g., if looking for React, also search for Next.js, TypeScript frontend)
+   - Try different location formats (city, country, region)
+   - Search by company names if relevant to find alumni
+   - Look for contributors to popular open source projects in the domain
+
+4. **Cast a wide net:** It's better to find 40-50 potential profiles and let getTopCandidates filter to the best 10 than to only search once.
 
 IMPORTANT - Tool-based Results Display:
 - When finding developers, ALWAYS use getTopCandidates to display results. The tool renders a beautiful UI with all candidate details.
@@ -892,11 +963,12 @@ IMPORTANT - Tool-based Results Display:
 - Only add brief conversational messages before tool calls (e.g., "Let me search for React developers in London...") or after if needed to clarify or suggest next steps.
 - NEVER include image URLs, avatar URLs, or any image markdown in your text responses. The UI handles all visual elements.
 
-Workflow for finding developers:
+## Workflow for finding developers:
 1. Acknowledge the request briefly
-2. Use searchGitHubProfiles to find profiles
-3. Immediately use getTopCandidates with the found usernames and requirements extracted from the query
-4. After the tool displays results, you may add a brief follow-up like "Would you like me to look into any of these candidates in more detail?" - but do NOT repeat the candidate information in text.
+2. Perform MULTIPLE searches (2-3 minimum) using different tools and query strategies
+3. Collect all unique usernames from all searches
+4. Use getTopCandidates with the combined list of usernames
+5. After the tool displays results, you may add a brief follow-up like "Would you like me to search with different criteria or look into any of these candidates in more detail?"
 
 For single profile analysis:
 - Use analyzeGitHubProfile - the tool renders a detailed profile card
@@ -909,7 +981,7 @@ For repository deep-dive analysis:
 - Do NOT repeat the analysis in text after the tool call
 
 For additional research on candidates:
-- Use webSearch to find their LinkedIn, personal sites, blog posts, talks, etc.
+- Use webSearch to find their personal sites, blog posts, talks, etc.
 - Use scrapeUrls to get content from specific URLs mentioned in their GitHub profile or found via webSearch
 
 Be conversational but concise. Let the tool UI do the heavy lifting for displaying data.`;
@@ -918,25 +990,26 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
     model: 'google/gemini-3-flash',
     system: roastMode ? roastModePrompt : normalPrompt,
     messages: modelMessages,
-    stopWhen: stepCountIs(10),
+    stopWhen: stepCountIs(15),
     tools: {
       searchGitHubProfiles: tool({
-        description: "Search for GitHub profiles using Exa AI. Good for natural language queries like 'rust developers in Sydney'. Use this when you want semantic/natural language search.",
+        description: "Search for GitHub profiles using Exa AI (returns up to 30 profiles). Good for natural language queries like 'rust developers in Sydney'. Use this when you want semantic/natural language search. Call this multiple times with different queries to find more candidates.",
         inputSchema: z.object({
           query: z.string().describe("The search query to find GitHub profiles, e.g. 'rust developers in Sydney' or 'React frontend engineers'"),
+          numResults: z.number().optional().describe("Number of results to return (default 30, max 30)"),
         }),
-        execute: async ({ query }) => {
+        execute: async ({ query, numResults }) => {
           const token = await getGitHubToken();
-          return searchGitHubProfiles(query, token);
+          return searchGitHubProfiles(query, token, numResults || 30);
         },
       }),
       searchGitHubUsers: tool({
-        description: "Search GitHub users directly via GitHub's Search API. Supports GitHub's search qualifiers for precise filtering: location:city, language:lang, followers:>N, repos:>N. Use this for structured searches with specific filters.",
+        description: "Search GitHub users directly via GitHub's Search API (returns up to 30 profiles). Supports GitHub's search qualifiers for precise filtering: location:city, language:lang, followers:>N, repos:>N. Use this for structured searches with specific filters. Call this multiple times with different queries to find more candidates.",
         inputSchema: z.object({
           query: z.string().describe("GitHub search query with optional qualifiers, e.g. 'language:rust location:sydney' or 'fullstack developer language:typescript followers:>100'"),
           sort: z.enum(["followers", "repositories", "joined"]).optional().describe("Sort results by: 'followers' (most followed), 'repositories' (most repos), or 'joined' (newest accounts)"),
           order: z.enum(["asc", "desc"]).optional().describe("Sort order: 'desc' for descending (default), 'asc' for ascending"),
-          perPage: z.number().optional().describe("Number of results to return (default 20, max 30)"),
+          perPage: z.number().optional().describe("Number of results to return (default 30, max 100)"),
         }),
         execute: async ({ query, sort, order, perPage }) => {
           const token = await getGitHubToken();
@@ -944,19 +1017,21 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
         },
       }),
       analyzeGitHubProfile: tool({
-        description: "Analyze a GitHub profile to get detailed information about a developer including their experience, languages, activity, and top projects.",
+        description: "Analyze a GitHub profile to get detailed information about a developer including their experience, languages, activity, and top projects. Set displayExpanded=true when analyzing a single profile the user specifically asked about (so it displays fully). Set displayExpanded=false when analyzing many profiles in bulk.",
         inputSchema: z.object({
           username: z.string().describe("The GitHub username to analyze"),
+          displayExpanded: z.boolean().optional().describe("Whether to display the profile expanded in the UI. Set to true when analyzing a single user the user specifically asked about, false when analyzing multiple profiles in bulk."),
         }),
-        execute: async ({ username }) => {
+        execute: async ({ username, displayExpanded }) => {
           const token = await getGitHubToken();
-          return analyzeGitHubProfileTool(username, token);
+          const result = await analyzeGitHubProfileTool(username, token);
+          return { ...result, displayExpanded: displayExpanded ?? false };
         },
       }),
       getTopCandidates: tool({
-        description: "Rank and score multiple GitHub profiles against a hiring brief. Use this after searching to get a ranked list of top candidates with match scores and reasons. Returns the top 5 candidates sorted by score.",
+        description: "Rank and score multiple GitHub profiles against a hiring brief. Use this after searching to get a ranked list of top candidates with match scores and reasons. Analyzes up to 20 profiles and returns the top 10 candidates sorted by score. Pass all usernames from your searches - duplicates are handled automatically.",
         inputSchema: z.object({
-          usernames: z.array(z.string()).describe("Array of GitHub usernames to evaluate"),
+          usernames: z.array(z.string()).describe("Array of GitHub usernames to evaluate (pass all found usernames, up to 20 will be analyzed)"),
           brief: z.object({
             requiredSkills: z.array(z.string()).optional().describe("Required programming languages or technologies, e.g. ['Rust', 'Python', 'TypeScript']"),
             preferredLocation: z.string().optional().describe("Preferred location or region, e.g. 'Sydney' or 'Europe'"),
@@ -969,16 +1044,39 @@ Be conversational but concise. Let the tool UI do the heavy lifting for displayi
         },
       }),
       webSearch: tool({
-        description: "Search the web for any content and get scraped results. Use this to find information from any website - articles, documentation, blog posts, portfolio sites, LinkedIn profiles, personal websites, etc. Can filter to specific domains or exclude domains.",
+        description: "Search the web for any content and get scraped results. Use this to find information from any website - articles, documentation, blog posts, portfolio sites, personal websites, etc. Can filter to specific domains, exclude domains, or use categories for specialized searches.",
         inputSchema: z.object({
           query: z.string().describe("The search query, e.g. 'best practices for React performance' or 'John Smith software engineer portfolio'"),
-          includeDomains: z.array(z.string()).optional().describe("Only include results from these domains, e.g. ['linkedin.com', 'medium.com']"),
+          includeDomains: z.array(z.string()).optional().describe("Only include results from these domains, e.g. ['medium.com', 'dev.to']"),
           excludeDomains: z.array(z.string()).optional().describe("Exclude results from these domains, e.g. ['pinterest.com']"),
           numResults: z.number().optional().describe("Number of results to return (default 10, max 20)"),
           type: z.enum(["keyword", "neural", "auto"]).optional().describe("Search type: 'keyword' for exact matches, 'neural' for semantic search, 'auto' to let Exa decide (default)"),
+          category: z.enum(["company", "research paper", "news", "pdf", "github", "tweet", "personal site", "linkedin profile", "financial report"]).optional().describe("Category filter for specialized searches. Use 'linkedin profile' for people, 'github' for code/repos, 'company' for businesses, 'news' for articles, 'personal site' for portfolios"),
         }),
-        execute: async ({ query, includeDomains, excludeDomains, numResults, type }) => {
-          return webSearchAndScrape(query, { includeDomains, excludeDomains, numResults, type });
+        execute: async ({ query, includeDomains, excludeDomains, numResults, type, category }) => {
+          return webSearchAndScrape(query, { includeDomains, excludeDomains, numResults, type, category });
+        },
+      }),
+      searchLinkedInProfiles: tool({
+        description: "Search for LinkedIn profiles using Exa AI's specialized people search. Best for finding professionals by name, title, company, or skills. Returns LinkedIn profile URLs and snippets.",
+        inputSchema: z.object({
+          query: z.string().describe("The search query for finding people, e.g. 'senior react developer at google' or 'machine learning engineer stanford'"),
+          numResults: z.number().optional().describe("Number of results to return (default 20)"),
+          type: z.enum(["keyword", "neural", "auto"]).optional().describe("Search type: 'keyword' for exact matches, 'neural' for semantic search, 'auto' to let Exa decide (default)"),
+        }),
+        execute: async ({ query, numResults, type }) => {
+          return searchPeople(query, { numResults, type });
+        },
+      }),
+      searchGitHubContent: tool({
+        description: "Search GitHub repositories and content using Exa AI's specialized GitHub category. Returns repos, code, and GitHub pages that match the query semantically.",
+        inputSchema: z.object({
+          query: z.string().describe("The search query for GitHub content, e.g. 'rust async runtime implementation' or 'react component library with animations'"),
+          numResults: z.number().optional().describe("Number of results to return (default 20)"),
+          type: z.enum(["keyword", "neural", "auto"]).optional().describe("Search type: 'keyword' for exact matches, 'neural' for semantic search, 'auto' to let Exa decide (default)"),
+        }),
+        execute: async ({ query, numResults, type }) => {
+          return searchGitHubExa(query, { numResults, type });
         },
       }),
       scrapeUrls: tool({
@@ -1118,177 +1216,6 @@ NOTE: This analysis takes 1-3 minutes as it runs in a sandboxed environment.`,
             const errorMsg = `Analysis failed: ${error instanceof Error ? error.message : String(error)}`;
             yield { status: 'error' as const, message: errorMsg, error: errorMsg };
             return { error: errorMsg, repoUrl };
-          }
-        },
-      }),
-      deepWebSearch: tool({
-        description: `Perform a multi-step deep web search with AI-powered analysis. This tool:
-1. Searches the web using multiple strategies
-2. Scrapes and extracts content from each result
-3. Uses AI to analyze and synthesize findings
-4. Provides a comprehensive summary with key themes, entities, and insights
-
-Use this instead of the basic webSearch tool when you need:
-- Thorough research on a topic
-- Analysis of multiple sources
-- Extraction of key themes and entities
-- AI-synthesized summaries
-- Follow-up suggestions
-
-Search types available:
-- general: General web search (default)
-- github_profiles: Search GitHub profiles only
-- linkedin: Search LinkedIn profiles
-- portfolio: Search personal websites/portfolios (excludes social media)
-- news: Search news articles
-- technical: Search technical content (StackOverflow, dev.to, etc.)
-
-NOTE: This search takes 30-60 seconds as it scrapes and analyzes multiple pages.`,
-        inputSchema: z.object({
-          query: z.string().describe("The search query to research"),
-          searchType: z.enum(["general", "github_profiles", "linkedin", "portfolio", "news", "technical"]).optional().describe("Type of search to perform (default: general)"),
-          maxResults: z.number().optional().describe("Maximum number of results to analyze (default: 10, max: 15)"),
-          includeDomains: z.array(z.string()).optional().describe("Only search these domains"),
-          excludeDomains: z.array(z.string()).optional().describe("Exclude these domains from search"),
-          context: z.string().optional().describe("Additional context to help the AI understand the search intent"),
-        }),
-        // Generator function for streaming progress updates to UI
-        async *execute({ query, searchType, maxResults, includeDomains, excludeDomains, context }): AsyncGenerator<SearchProgress, import("@/lib/actions/search-agent").SearchAnalysis | { error: string; query: string }> {
-          // Stream progress from the search generator
-          try {
-            let lastProgress: SearchProgress | undefined;
-
-            for await (const progress of searchWithProgress({
-              query,
-              searchType: searchType || "general",
-              maxResults: Math.min(maxResults || 10, 15),
-              includeDomains,
-              excludeDomains,
-              context,
-            })) {
-              lastProgress = progress;
-              yield progress;
-            }
-
-            // Return the final result
-            if (lastProgress?.status === 'complete' && lastProgress.result) {
-              return lastProgress.result;
-            }
-
-            if (lastProgress?.status === 'error') {
-              return { error: lastProgress.error || lastProgress.message, query };
-            }
-
-            return { error: 'Search failed: No result returned', query };
-
-          } catch (error) {
-            const errorMsg = `Search failed: ${error instanceof Error ? error.message : String(error)}`;
-            yield { status: 'error' as const, message: errorMsg, error: errorMsg, query };
-            return { error: errorMsg, query };
-          }
-        },
-      }),
-      linkedinSearch: tool({
-        description: `Search for LinkedIn profiles using advanced filters. This uses LinkedIn's search directly (not web search) and returns detailed profile data.
-
-Search options:
-- **searchQuery**: General fuzzy search (e.g., "Machine Learning Engineer", "John Doe")
-- **currentJobTitles**: Exact job title match (e.g., ["Software Engineer", "Data Scientist"])
-- **locations**: Filter by location (e.g., ["Sydney", "San Francisco", "London"])
-- **currentCompanies**: LinkedIn company URLs (e.g., ["google", "meta"])
-- **pastCompanies**: Previous employers
-- **schools**: LinkedIn school URLs (e.g., ["stanford-university"])
-
-Returns full profile data including work history, education, skills, and more. No need to call linkedinProfile separately unless you want to refresh the data.
-
-NOTE: This search can take 30-60 seconds as it fetches complete profile data.`,
-        inputSchema: z.object({
-          searchQuery: z.string().optional().describe("General search query (fuzzy search), e.g. 'Machine Learning Engineer' or 'John Doe'"),
-          currentJobTitles: z.array(z.string()).optional().describe("List of exact job titles to search for, e.g. ['Software Engineer', 'Senior Developer']"),
-          locations: z.array(z.string()).optional().describe("List of locations, e.g. ['Sydney', 'New York', 'London']"),
-          currentCompanies: z.array(z.string()).optional().describe("List of LinkedIn company URL slugs where they currently work, e.g. ['google', 'meta', 'amazon']"),
-          pastCompanies: z.array(z.string()).optional().describe("List of LinkedIn company URL slugs where they previously worked"),
-          schools: z.array(z.string()).optional().describe("List of LinkedIn school URL slugs, e.g. ['stanford-university', 'mit']"),
-          maxResults: z.number().optional().describe("Maximum number of results to return (default 10, max 25)"),
-        }),
-        execute: async ({ searchQuery, currentJobTitles, locations, currentCompanies, pastCompanies, schools, maxResults }) => {
-          try {
-            const options: LinkedInSearchOptions = {
-              profileScraperMode: "Full",
-              maxItems: Math.min(maxResults || 10, 25),
-              takePages: 1,
-            };
-
-            if (searchQuery) options.searchQuery = searchQuery;
-            if (currentJobTitles?.length) options.currentJobTitles = currentJobTitles;
-            if (locations?.length) options.locations = locations;
-            if (currentCompanies?.length) options.currentCompanies = currentCompanies;
-            if (pastCompanies?.length) options.pastCompanies = pastCompanies;
-            if (schools?.length) options.schools = schools;
-
-            const profiles = await searchLinkedInProfiles(options);
-
-            return {
-              searchParams: { searchQuery, currentJobTitles, locations, currentCompanies },
-              profiles: profiles.map(p => ({
-                name: p.name,
-                headline: p.headline,
-                location: p.location,
-                profileUrl: p.profileUrl,
-                currentCompany: p.currentCompany,
-                currentRole: p.currentRole,
-                about: p.about?.slice(0, 500),
-                openToWork: p.openToWork,
-                verified: p.verified,
-                connectionCount: p.connectionCount,
-                topSkills: p.topSkills,
-                experience: p.experience.slice(0, 3).map(e => ({
-                  title: e.title,
-                  company: e.company,
-                  duration: e.duration,
-                  isCurrent: e.isCurrent,
-                })),
-                education: p.education.slice(0, 2).map(e => ({
-                  school: e.school,
-                  degree: e.degree,
-                  field: e.field,
-                })),
-                skills: p.skills.slice(0, 10),
-              })),
-              total: profiles.length,
-            };
-          } catch (error) {
-            return { error: `LinkedIn search failed: ${error instanceof Error ? error.message : String(error)}` };
-          }
-        },
-      }),
-      linkedinProfile: tool({
-        description: `Scrape detailed information from a LinkedIn profile. Returns comprehensive professional data including:
-- Name, headline, location, about/summary
-- Current company and role
-- Full work history with dates and descriptions
-- Education history
-- Skills list
-- Certifications
-- Languages
-
-Use this after finding profiles with linkedinSearch or when you have a specific LinkedIn URL/username to analyze. Great for:
-- Deep candidate research
-- Verifying work history
-- Understanding career trajectory
-- Finding skills and certifications`,
-        inputSchema: z.object({
-          profileUrlOrUsername: z.string().describe("LinkedIn profile URL (e.g., 'https://linkedin.com/in/johndoe') or just the username (e.g., 'johndoe')"),
-        }),
-        execute: async ({ profileUrlOrUsername }): Promise<LinkedInProfile | { error: string; profileUrl: string }> => {
-          try {
-            const profile = await scrapeLinkedInProfile(profileUrlOrUsername);
-            return profile;
-          } catch (error) {
-            return {
-              error: `Failed to scrape LinkedIn profile: ${error instanceof Error ? error.message : String(error)}`,
-              profileUrl: profileUrlOrUsername,
-            };
           }
         },
       }),

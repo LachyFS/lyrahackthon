@@ -3,12 +3,6 @@
 import Exa from "exa-js";
 import { streamText, tool } from "ai";
 import { z } from "zod";
-import {
-  scrapeLinkedInProfile,
-  searchLinkedInProfiles,
-  type LinkedInProfile,
-  type LinkedInSearchOptions,
-} from "../linkedin";
 import { getRelatedGitHubUsers } from "./github-analyze";
 
 // Initialize Exa client
@@ -23,7 +17,7 @@ export interface SearchAgentConfig {
   /**
    * Type of search to perform - influences agent strategy
    */
-  searchType?: "general" | "github_profiles" | "linkedin" | "portfolio" | "news" | "technical";
+  searchType?: "general" | "github_profiles" | "portfolio" | "news" | "technical";
   /**
    * Maximum number of agent steps (tool calls)
    */
@@ -104,14 +98,13 @@ function createSearchTools(config: SearchAgentConfig) {
 
 Use includeDomains/excludeDomains to focus your search:
 - For GitHub profiles/repos: includeDomains: ["github.com"]
-- For LinkedIn profiles: includeDomains: ["linkedin.com"]
 - For technical content: includeDomains: ["stackoverflow.com", "dev.to", "medium.com", "hackernoon.com", "reddit.com", "news.ycombinator.com"]
 - For news: excludeDomains: ["github.com", "stackoverflow.com"] (to avoid code results)
-- For portfolios: excludeDomains: ["linkedin.com", "github.com", "twitter.com", "facebook.com"]`,
+- For portfolios: excludeDomains: ["github.com", "twitter.com", "facebook.com"]`,
       inputSchema: z.object({
         query: z.string().describe("The search query"),
         numResults: z.number().optional().describe("Number of results to return (1-10, default 5)"),
-        includeDomains: z.array(z.string()).optional().describe("Only include results from these domains (e.g. ['github.com', 'linkedin.com'])"),
+        includeDomains: z.array(z.string()).optional().describe("Only include results from these domains (e.g. ['github.com', 'stackoverflow.com'])"),
         excludeDomains: z.array(z.string()).optional().describe("Exclude results from these domains"),
       }),
       execute: async ({ query, numResults, includeDomains, excludeDomains }) => {
@@ -171,80 +164,6 @@ Use includeDomains/excludeDomains to focus your search:
           content: r.text || "",
           publishedDate: r.publishedDate,
           author: r.author,
-        }));
-      },
-    }),
-
-    linkedin_profile: tool({
-      description: `Scrape detailed information from a LinkedIn profile. Use this when you have a LinkedIn profile URL or username and need comprehensive professional information including work history, education, skills, and certifications.
-
-IMPORTANT: This tool requires a LinkedIn profile URL or username. To find LinkedIn profiles first, use web_search with includeDomains: ["linkedin.com"] or use the query pattern "site:linkedin.com/in/ <person name>"`,
-      inputSchema: z.object({
-        profileUrlOrUsername: z.string().describe("LinkedIn profile URL (e.g., 'https://linkedin.com/in/johndoe') or just the username (e.g., 'johndoe')"),
-      }),
-      execute: async ({ profileUrlOrUsername }): Promise<LinkedInProfile | { error: string; profileUrl: string }> => {
-        console.log("Scraping LinkedIn profile:", profileUrlOrUsername);
-        try {
-          const profile = await scrapeLinkedInProfile(profileUrlOrUsername);
-          return profile;
-        } catch (error) {
-          console.error("LinkedIn scrape error:", error);
-          return {
-            error: error instanceof Error ? error.message : "Failed to scrape LinkedIn profile",
-            profileUrl: profileUrlOrUsername,
-          };
-        }
-      },
-    }),
-
-    linkedin_search: tool({
-      description: `Search for LinkedIn profiles using advanced filters. This searches LinkedIn directly and returns detailed profile data.
-
-Search options:
-- searchQuery: General fuzzy search (e.g., "Machine Learning Engineer", "John Doe")
-- currentJobTitles: Exact job title match (e.g., ["Software Engineer", "Data Scientist"])
-- locations: Filter by location (e.g., ["Sydney", "San Francisco"])
-- currentCompanies: LinkedIn company slugs (e.g., ["google", "meta"])
-
-Returns full profile data including work history, education, and skills.`,
-      inputSchema: z.object({
-        searchQuery: z.string().optional().describe("General search query (fuzzy search)"),
-        currentJobTitles: z.array(z.string()).optional().describe("List of exact job titles to search for"),
-        locations: z.array(z.string()).optional().describe("List of locations"),
-        currentCompanies: z.array(z.string()).optional().describe("List of LinkedIn company URL slugs"),
-        maxResults: z.number().optional().describe("Maximum results (default 10, max 25)"),
-      }),
-      execute: async ({ searchQuery, currentJobTitles, locations, currentCompanies, maxResults }) => {
-        console.log("Searching LinkedIn profiles:", { searchQuery, currentJobTitles, locations });
-
-        const options: LinkedInSearchOptions = {
-          profileScraperMode: "Full",
-          maxItems: Math.min(maxResults || 10, 25),
-          takePages: 1,
-        };
-
-        if (searchQuery) options.searchQuery = searchQuery;
-        if (currentJobTitles?.length) options.currentJobTitles = currentJobTitles;
-        if (locations?.length) options.locations = locations;
-        if (currentCompanies?.length) options.currentCompanies = currentCompanies;
-
-        const profiles = await searchLinkedInProfiles(options);
-
-        return profiles.map(p => ({
-          name: p.name,
-          headline: p.headline,
-          location: p.location,
-          profileUrl: p.profileUrl,
-          currentCompany: p.currentCompany,
-          currentRole: p.currentRole,
-          about: p.about?.slice(0, 300),
-          openToWork: p.openToWork,
-          skills: p.skills.slice(0, 10),
-          experience: p.experience.slice(0, 3).map(e => ({
-            title: e.title,
-            company: e.company,
-            duration: e.duration,
-          })),
         }));
       },
     }),
@@ -319,69 +238,115 @@ Returns the user's profile info plus a list of related developers sorted by the 
 // ============================================================================
 
 function getAgentSystemPrompt(config: SearchAgentConfig): string {
-  const basePrompt = `You are an expert web research agent. Your job is to thoroughly research a topic using the tools available to you.
+  const basePrompt = `You are an expert web research agent specializing in talent discovery and sourcing. Your job is to thoroughly research a topic using the tools available to you.
 
 ## YOUR TOOLS
 
 1. **web_search** - Search the web with optional domain filtering. Use includeDomains/excludeDomains to focus:
    - GitHub: includeDomains: ["github.com"]
-   - LinkedIn: includeDomains: ["linkedin.com"]
    - Technical: includeDomains: ["stackoverflow.com", "dev.to", "medium.com", "reddit.com", "news.ycombinator.com"]
    - News: excludeDomains: ["github.com", "stackoverflow.com"]
-   - Portfolios: excludeDomains: ["linkedin.com", "github.com", "twitter.com"]
+   - Portfolios: excludeDomains: ["github.com", "twitter.com"]
+   - Hackathons: includeDomains: ["devpost.com", "mlh.io", "hackathon.com", "devfolio.co"]
+   - Universities: includeDomains: ["edu", "ac.uk", "edu.au"]
 
 2. **find_similar** - Find pages similar to a URL. Great for discovering related content.
 
 3. **scrape_urls** - Get full content from specific URLs when you need more detail.
 
-4. **linkedin_search** - Search specifically for LinkedIn profiles by name, title, company, or skills. Returns profile URLs that can be scraped for details.
-
-5. **linkedin_profile** - Scrape detailed information from a LinkedIn profile URL or username. Returns comprehensive professional data including work history, education, skills, certifications, and more. Use this after finding profiles with linkedin_search or web_search.
-
-6. **github_profile_lookup** - Look up a GitHub user and find related developers based on repository contributions. This is EXTREMELY powerful for:
+4. **github_profile_lookup** - Look up a GitHub user and find related developers based on repository contributions. This is EXTREMELY powerful for:
    - Finding developers who work on similar projects
    - Discovering collaborators and team members
    - Surfacing candidates with relevant open source experience
    - Understanding someone's professional network in tech
 
+## ADVANCED SEARCH STRATEGIES
+
+### Finding Junior Developers / Entry-Level Talent
+When searching for juniors, graduates, or early-career developers, use these creative sourcing strategies:
+
+1. **University & Education Sources**
+   - Search for computer science / software engineering student projects at universities in the target location
+   - Look for university tech societies and clubs (e.g., "University of Sydney computer science society", "MIT hackathon club")
+   - Find capstone projects, thesis work, or student portfolios
+   - Search: "[location] university computer science students github"
+   - Search: "[university name] software engineering society members"
+
+2. **Hackathon Participants**
+   - Search devpost.com for hackathon winners/participants in the target location or technology
+   - Look for MLH (Major League Hacking) event participants
+   - Search: "devpost [location] hackathon winners [technology]"
+   - Search: "[technology] hackathon 2024 2025 participants github"
+   - Find recent hackathon projects and their team members
+
+3. **Bootcamp Graduates**
+   - Search for coding bootcamp graduates in the area
+   - Look at bootcamp showcase pages and demo days
+   - Search: "[location] coding bootcamp graduates portfolio"
+
+4. **Student Developer Communities**
+   - GitHub Campus Experts in the target location
+   - Google Developer Student Clubs (GDSC)
+   - Microsoft Learn Student Ambassadors
+   - Search: "GitHub campus expert [location]"
+   - Search: "Google developer student club [university/location]"
+
+5. **Open Source First-Time Contributors**
+   - Search for "first contribution" or "good first issue" contributors
+   - Look at Hacktoberfest participants
+   - Search: "hacktoberfest [year] contributor [technology] github"
+
+### Finding Senior/Specialized Developers
+1. **Conference Speakers** - Search for speakers at tech conferences in the relevant domain
+2. **Open Source Maintainers** - Use github_profile_lookup to find maintainers of popular repos
+3. **Technical Blog Authors** - Search dev.to, medium, hashnode for prolific technical writers
+4. **Stack Overflow Top Contributors** - Look for high-rep users in specific tags
+
+### Location-Based Sourcing
+When a location is specified:
+1. Search for local tech meetups and their organizers
+2. Find local tech companies and their engineering blogs
+3. Look for regional tech communities on LinkedIn, Twitter, Discord
+4. Search: "[city] tech meetup organizer github"
+5. Search: "[city] software developers community"
+
 ## RESEARCH STRATEGY
 
-1. **Start broad** - Begin with a general search to understand the landscape
-2. **Focus with domains** - Use includeDomains/excludeDomains to target specific sources
-3. **Go deeper** - Use find_similar or targeted searches to explore promising leads
-4. **Cross-reference** - Verify information across multiple sources
-5. **Fill gaps** - Use scrape_urls to get more detail from important pages
-6. **For people research** - Use linkedin_search to find profiles, then linkedin_profile to get detailed professional info
-7. **For developer research** - Use github_profile_lookup to find related developers through shared repository contributions
+1. **Identify the talent profile** - Junior? Senior? Specific skills? Location requirements?
+2. **Choose appropriate sourcing channels** - Universities for juniors, conferences for seniors, etc.
+3. **Start with targeted searches** - Use the strategies above based on the profile
+4. **Expand through networks** - Use github_profile_lookup to find related developers
+5. **Cross-reference** - Verify information across multiple sources
+6. **Go deeper** - Use scrape_urls and find_similar to explore promising leads
 
 ## IMPORTANT GUIDELINES
 
 - Make multiple tool calls to gather comprehensive information
 - Don't stop after just one search - explore multiple angles
+- For junior developers, ALWAYS try university/hackathon/bootcamp sourcing strategies
 - Use domain filtering strategically (e.g., includeDomains: ["github.com"] for developers)
 - When you find an interesting URL, consider using find_similar to discover related content
-- For researching professionals, use linkedin_search + linkedin_profile for detailed career information
 - For finding developers, use github_profile_lookup - it returns related users who contribute to the same repositories
-- When searching for GitHub developers, use github_profile_lookup first to get related developers, then investigate the most promising ones
+- When searching for GitHub developers, use github_profile_lookup to find related developers through shared repos
+- Think creatively about where the target talent pool might be found
 - Summarize your findings thoroughly at the end
 
 ## OUTPUT FORMAT
 
 After researching, provide a comprehensive summary that includes:
 - Key findings and insights
-- Important entities (people, companies, technologies)
+- Candidate profiles discovered (with links to their GitHub/portfolio)
+- Sourcing channels that worked well
 - Notable patterns or themes
 - Relevant URLs and sources
 - Related developers found through repo contributions (when applicable)
-- Suggested follow-up areas`;
+- Suggested follow-up areas and additional sourcing strategies to try`;
 
   // Add search-type specific guidance
   const typeGuidance: Record<string, string> = {
     github_profiles: `\n\n## FOCUS: GitHub Profiles\nYou're looking for GitHub developer profiles. Use these strategies:\n1. **Start with github_profile_lookup** if you have a username - this returns the profile AND related developers who contribute to the same repos\n2. Use web_search with includeDomains: ["github.com"] to find profiles by name/skill\n3. Once you find a relevant developer, use github_profile_lookup to discover their collaborators\n\nLook for:\n- Developer expertise and languages\n- Notable repositories and contributions\n- Related developers (collaborators on the same projects)\n- Activity levels and commit history\n- Open source involvement`,
 
-    linkedin: `\n\n## FOCUS: LinkedIn Profiles\nYou're searching for professional profiles. Use the linkedin_search tool to find profiles, then linkedin_profile to get detailed information. Look for:\n- Work history and experience\n- Skills and endorsements\n- Education and certifications\n- Professional connections and companies\n- Current role and company`,
-
-    portfolio: `\n\n## FOCUS: Portfolio Sites\nYou're looking for personal portfolio websites. Use excludeDomains: ["linkedin.com", "github.com", "twitter.com", "facebook.com"]. Look for:\n- Personal projects and case studies\n- Design work and technical skills\n- Contact information\n- Client testimonials`,
+    portfolio: `\n\n## FOCUS: Portfolio Sites\nYou're looking for personal portfolio websites. Use excludeDomains: ["github.com", "twitter.com", "facebook.com"]. Look for:\n- Personal projects and case studies\n- Design work and technical skills\n- Contact information\n- Client testimonials`,
 
     news: `\n\n## FOCUS: News & Recent Events\nYou're searching for recent news. Use excludeDomains: ["github.com", "stackoverflow.com"]. Look for:\n- Recent announcements and developments\n- Press coverage and media mentions\n- Industry trends and analysis\n- Timeline of events`,
 

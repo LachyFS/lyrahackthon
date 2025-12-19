@@ -25,6 +25,7 @@ import {
   User as UserIcon,
   LogOut,
   GithubIcon,
+  Activity,
 } from "lucide-react";
 
 interface AppSidebarProps {
@@ -48,6 +49,12 @@ export function AppSidebar({ user }: AppSidebarProps) {
       href: "/ai-search",
       icon: MessageSquare,
       isActive: pathname === "/ai-search" && !roastMode,
+    },
+    {
+      label: "Sonar",
+      href: "/sonar",
+      icon: Activity,
+      isActive: pathname.startsWith("/sonar"),
     },
     {
       label: "Roast Mode",

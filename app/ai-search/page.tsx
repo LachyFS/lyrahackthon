@@ -28,6 +28,9 @@ import {
   FileText,
   Link as LinkIcon,
   Paperclip,
+  Linkedin,
+  Briefcase,
+  Building2,
 } from "lucide-react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { AppLayout } from "@/components/app-layout";
@@ -35,13 +38,14 @@ import { GitRadarLogoWave, GitRoastLogo } from "@/components/gitradar-logo";
 import Link from "next/link";
 import { DefaultChatTransport } from "ai";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { createClient } from "@/lib/supabase/client";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { ExpandableProfileCard } from "@/components/expandable-profile-card";
 import { EmailDraft } from "@/components/email-draft";
 import { RepoAnalysisCard, RepoAnalysisError, RepoAnalysisSkeleton, RepoAnalysisProgress, ParallelRepoAnalysisProgress, ParallelRepoAnalysisResults } from "@/components/repo-analysis-card";
 import { SearchAgentCard, SearchAgentError, SearchAgentSkeleton, SearchAgentProgress } from "@/components/search-agent-card";
-import { LinkedInSearchResult, LinkedInProfileResult } from "@/components/linkedin-result-card";
 import { TextArtifact, TextArtifactPreview, LARGE_TEXT_THRESHOLD, detectTextType } from "@/components/text-artifact";
 import { motion, AnimatePresence } from "framer-motion";
 import type { RepoAnalysis, AnalysisProgress, ParallelAnalysisProgress } from "@/lib/actions/repo-analyze";
@@ -124,20 +128,203 @@ function ScrollToBottomButton() {
   );
 }
 
+// Helper to check if a tool result has zero/empty results (should be hidden)
+function hasEmptyResults(toolName: string, result: unknown): boolean {
+  if (!result || typeof result !== 'object') {
+    return false; // Don't hide if we can't determine
+  }
+
+  switch (toolName) {
+    case "searchGitHubProfiles": {
+      const data = result as { profiles?: Array<unknown>; total?: number };
+      return (data.total || data.profiles?.length || 0) === 0;
+    }
+    case "searchGitHubUsers": {
+      const data = result as { users?: Array<unknown>; total_count?: number };
+      return (data.total_count || data.users?.length || 0) === 0;
+    }
+    case "getTopCandidates": {
+      const data = result as { candidates?: Array<unknown> };
+      return (data.candidates?.length || 0) === 0;
+    }
+    case "webSearch": {
+      const data = result as { results?: Array<unknown> };
+      return (data.results?.length || 0) === 0;
+    }
+    case "scrapeUrls": {
+      const data = result as { results?: Array<unknown> };
+      return (data.results?.length || 0) === 0;
+    }
+    case "searchLinkedInProfiles": {
+      const data = result as { results?: Array<unknown>; total?: number };
+      return (data.total || data.results?.length || 0) === 0;
+    }
+    case "searchGitHubContent": {
+      const data = result as { results?: Array<unknown>; total?: number };
+      return (data.total || data.results?.length || 0) === 0;
+    }
+    default:
+      return false; // Don't hide other tools by default
+  }
+}
+
+// Helper to generate descriptive summary for collapsed tool results
+function getToolSummary(toolName: string, result: unknown): string {
+  if (!result || typeof result !== 'object') {
+    return getToolLabel(toolName);
+  }
+
+  switch (toolName) {
+    case "searchGitHubProfiles": {
+      const data = result as { query?: string; profiles?: Array<unknown>; total?: number };
+      const count = data.total || data.profiles?.length || 0;
+      const query = data.query || "profiles";
+      return `Found ${count} profile${count !== 1 ? 's' : ''} for "${query}"`;
+    }
+    case "searchGitHubUsers": {
+      const data = result as { query?: string; users?: Array<{ username: string }>; total_count?: number };
+      const count = data.total_count || data.users?.length || 0;
+      const query = data.query || "users";
+      const topUsers = data.users?.slice(0, 3).map(u => u.username).join(", ");
+      return topUsers
+        ? `Found ${count} user${count !== 1 ? 's' : ''}: ${topUsers}${count > 3 ? ` +${count - 3} more` : ''}`
+        : `Found ${count} user${count !== 1 ? 's' : ''} for "${query}"`;
+    }
+    case "analyzeGitHubProfile": {
+      const data = result as { username?: string; name?: string; totalStars?: number; public_repos?: number; languages?: Array<{ name: string }> };
+      const name = data.name || data.username || "profile";
+      const stars = data.totalStars || 0;
+      const repos = data.public_repos || 0;
+      const topLang = data.languages?.[0]?.name;
+      const langPart = topLang ? ` • ${topLang}` : '';
+      return `@${data.username || name}: ${repos} repos, ${stars} stars${langPart}`;
+    }
+    case "getTopCandidates": {
+      const data = result as { candidates?: Array<{ username: string; score: number }> };
+      const count = data.candidates?.length || 0;
+      if (count === 0) return "No candidates found";
+      const topCandidates = data.candidates?.slice(0, 3).map(c => `@${c.username}`).join(", ");
+      return `${count} candidate${count !== 1 ? 's' : ''} ranked: ${topCandidates}${count > 3 ? ` +${count - 3} more` : ''}`;
+    }
+    case "generateDraftEmail": {
+      const data = result as { candidateUsername?: string; candidateName?: string; role?: string };
+      const name = data.candidateName || data.candidateUsername || "candidate";
+      const role = data.role ? ` for ${data.role}` : '';
+      return `Email draft for ${name}${role}`;
+    }
+    case "analyzeGitHubRepository": {
+      // Handle both AnalysisProgress wrapper and direct RepoAnalysis
+      const data = result as { repoOwner?: string; repoName?: string; result?: { summary?: string } };
+      const repoName = data.repoName || "repository";
+      const repoOwner = data.repoOwner || "";
+      const summary = data.result?.summary;
+      if (summary) {
+        const truncated = summary.length > 60 ? summary.slice(0, 60) + "..." : summary;
+        return `${repoOwner}/${repoName}: ${truncated}`;
+      }
+      return `Repository analysis: ${repoOwner}/${repoName}`;
+    }
+    case "webSearch": {
+      const data = result as { query?: string; results?: Array<unknown> };
+      const count = data.results?.length || 0;
+      const query = data.query || "query";
+      return `Found ${count} result${count !== 1 ? 's' : ''} for "${query}"`;
+    }
+    case "scrapeUrls": {
+      const data = result as { results?: Array<{ url: string; title?: string; error?: string }> };
+      const results = data.results || [];
+      const successCount = results.filter(r => !r.error).length;
+      const errorCount = results.filter(r => r.error).length;
+      if (errorCount > 0) {
+        return `Scraped ${successCount} URL${successCount !== 1 ? 's' : ''} (${errorCount} failed)`;
+      }
+      return `Scraped ${successCount} URL${successCount !== 1 ? 's' : ''} successfully`;
+    }
+    case "deepWebSearch": {
+      // Handle both SearchProgress wrapper and direct SearchAnalysis
+      const data = result as { query?: string; result?: { sources?: Array<unknown>; summary?: string } };
+      const query = data.query || "";
+      const sourceCount = data.result?.sources?.length || 0;
+      if (query && sourceCount > 0) {
+        return `Deep search: "${query}" (${sourceCount} sources analyzed)`;
+      }
+      if (query) {
+        return `Deep search completed for "${query}"`;
+      }
+      return `Deep search analysis complete`;
+    }
+    case "searchLinkedInProfiles": {
+      const data = result as { query?: string; results?: Array<unknown>; total?: number };
+      const count = data.total || data.results?.length || 0;
+      const query = data.query || "profiles";
+      return `Found ${count} LinkedIn profile${count !== 1 ? 's' : ''} for "${query}"`;
+    }
+    case "searchGitHubContent": {
+      const data = result as { query?: string; results?: Array<unknown>; total?: number };
+      const count = data.total || data.results?.length || 0;
+      const query = data.query || "content";
+      return `Found ${count} GitHub result${count !== 1 ? 's' : ''} for "${query}"`;
+    }
+    default:
+      return getToolLabel(toolName);
+  }
+}
+
+function getToolLabel(name: string): string {
+  switch (name) {
+    case "searchGitHubProfiles":
+      return "Search Results";
+    case "searchGitHubUsers":
+      return "GitHub User Search";
+    case "analyzeGitHubProfile":
+      return "Profile Analysis";
+    case "getTopCandidates":
+      return "Reviewed Candidates";
+    case "generateDraftEmail":
+      return "Email Draft";
+    case "analyzeGitHubRepository":
+      return "Repository Analysis";
+    case "webSearch":
+      return "Web Search Results";
+    case "scrapeUrls":
+      return "Scraped Content";
+    case "deepWebSearch":
+      return "Deep Search Analysis";
+    case "searchLinkedInProfiles":
+      return "LinkedIn Profiles";
+    case "searchGitHubContent":
+      return "GitHub Content";
+    default:
+      return "Tool Result";
+  }
+}
+
 // Collapsible wrapper for tool results with auto-collapse
 function CollapsibleToolResult({
   toolName,
   children,
   autoCollapse = true,
   hasFollowingTool = false,
+  result,
 }: {
   toolName: string;
   children: React.ReactNode;
   autoCollapse?: boolean;
   hasFollowingTool?: boolean;
+  result?: unknown;
 }) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const hasAutoCollapsed = useRef(false);
+  // Search tools should start collapsed
+  const isSearchTool = [
+    "searchGitHubProfiles",
+    "searchGitHubUsers",
+    "webSearch",
+    "scrapeUrls",
+    "searchLinkedInProfiles",
+    "searchGitHubContent",
+  ].includes(toolName);
+
+  const [isExpanded, setIsExpanded] = useState(!isSearchTool);
+  const hasAutoCollapsed = useRef(isSearchTool);
 
   // Auto-collapse when there's a following tool (takes priority over time-based)
   useEffect(() => {
@@ -147,45 +334,21 @@ function CollapsibleToolResult({
     }
   }, [autoCollapse, hasFollowingTool]);
 
-  const getToolLabel = (name: string) => {
-    switch (name) {
-      case "searchGitHubProfiles":
-        return "Search Results";
-      case "searchGitHubUsers":
-        return "GitHub User Search";
-      case "analyzeGitHubProfile":
-        return "Profile Analysis";
-      case "getTopCandidates":
-        return "Reviewed Candidates";
-      case "generateDraftEmail":
-        return "Email Draft";
-      case "analyzeGitHubRepository":
-        return "Repository Analysis";
-      case "webSearch":
-        return "Web Search Results";
-      case "scrapeUrls":
-        return "Scraped Content";
-      case "deepWebSearch":
-        return "Deep Search Analysis";
-      case "linkedinSearch":
-        return "LinkedIn Profiles";
-      case "linkedinProfile":
-        return "LinkedIn Profile";
-      default:
-        return "Tool Result";
-    }
-  };
+  // Get the appropriate label - detailed summary when collapsed, simple label when expanded
+  const displayLabel = isExpanded
+    ? getToolLabel(toolName)
+    : getToolSummary(toolName, result);
 
   return (
     <div className="space-y-2">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-white transition-colors w-full"
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-white transition-colors w-full text-left"
       >
         <ChevronDown
-          className={`h-3 w-3 transition-transform duration-200 ${isExpanded ? '' : '-rotate-90'}`}
+          className={`h-3 w-3 flex-shrink-0 transition-transform duration-200 ${isExpanded ? '' : '-rotate-90'}`}
         />
-        <span>{getToolLabel(toolName)}</span>
+        <span className="truncate">{displayLabel}</span>
       </button>
       <div
         className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
@@ -977,6 +1140,201 @@ function AISearchContent() {
       );
     }
 
+    if (toolName === "searchLinkedInProfiles") {
+      const data = result as {
+        query?: string;
+        results?: Array<{
+          url: string;
+          title: string;
+          content?: string;
+          publishedDate?: string;
+          author?: string;
+        }>;
+        total?: number;
+      };
+
+      const results = data.results || [];
+
+      // Helper to parse LinkedIn profile info from title and content
+      const parseLinkedInProfile = (item: typeof results[0]) => {
+        // Title format is usually "Name - Title - Company | LinkedIn" or "Name | LinkedIn"
+        const title = item.title || "";
+        const parts = title.replace(/ \| LinkedIn$/, "").split(" - ");
+        const name = parts[0]?.trim() || "Unknown";
+        const jobTitle = parts[1]?.trim() || null;
+        const company = parts[2]?.trim() || null;
+
+        // Extract location from content if available
+        let location: string | null = null;
+        if (item.content) {
+          // Common patterns: "Location: City, Country" or "City, Country · 500+ connections"
+          const locationMatch = item.content.match(/(?:^|\n)([A-Z][a-zA-Z\s]+,\s*[A-Z][a-zA-Z\s]+)(?:\s*·|\s*\n|$)/);
+          if (locationMatch) {
+            location = locationMatch[1].trim();
+          }
+        }
+
+        return { name, jobTitle, company, location };
+      };
+
+      return (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Linkedin className="h-4 w-4 text-[#0A66C2]" />
+            <span>Found {data.total || results.length} LinkedIn profiles for &quot;{data.query}&quot;</span>
+          </div>
+          {results.length > 0 ? (
+            <div className="space-y-2">
+              {results.slice(0, 8).map((item, i) => {
+                const profile = parseLinkedInProfile(item);
+                return (
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-[#0A66C2]/20 flex items-center justify-center flex-shrink-0">
+                      <User className="h-5 w-5 text-[#0A66C2]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#0A66C2] hover:underline font-medium truncate"
+                        >
+                          {profile.name}
+                        </a>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                      </div>
+                      {profile.jobTitle && (
+                        <div className="flex items-center gap-1.5 text-sm text-white/80 mt-0.5">
+                          <Briefcase className="h-3 w-3 text-muted-foreground" />
+                          <span className="truncate">{profile.jobTitle}</span>
+                        </div>
+                      )}
+                      {profile.company && (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                          <Building2 className="h-3 w-3" />
+                          <span className="truncate">{profile.company}</span>
+                        </div>
+                      )}
+                      {profile.location && (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                          <MapPin className="h-3 w-3" />
+                          <span className="truncate">{profile.location}</span>
+                        </div>
+                      )}
+                      {item.content && !profile.jobTitle && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {item.content.slice(0, 150)}{item.content.length > 150 ? '...' : ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {results.length > 8 && (
+                <div className="text-xs text-muted-foreground pl-2 pt-1">
+                  + {results.length - 8} more profiles
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No LinkedIn profiles found</p>
+          )}
+        </div>
+      );
+    }
+
+    if (toolName === "searchGitHubContent") {
+      const data = result as {
+        query?: string;
+        results?: Array<{
+          url: string;
+          title: string;
+          content?: string;
+          publishedDate?: string;
+          author?: string;
+        }>;
+        total?: number;
+      };
+
+      const results = data.results || [];
+
+      // Helper to parse GitHub URL info
+      const parseGitHubUrl = (url: string) => {
+        // Patterns: github.com/owner/repo, github.com/owner/repo/blob/..., github.com/owner
+        const match = url.match(/github\.com\/([^\/]+)(?:\/([^\/]+))?/);
+        if (match) {
+          return {
+            owner: match[1],
+            repo: match[2] || null,
+            isRepo: !!match[2],
+          };
+        }
+        return { owner: null, repo: null, isRepo: false };
+      };
+
+      return (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Github className="h-4 w-4" />
+            <span>Found {data.total || results.length} GitHub results for &quot;{data.query}&quot;</span>
+          </div>
+          {results.length > 0 ? (
+            <div className="space-y-2">
+              {results.slice(0, 8).map((item, i) => {
+                const ghInfo = parseGitHubUrl(item.url);
+                return (
+                  <div
+                    key={i}
+                    className="p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
+                        <Github className="h-4 w-4 text-white/70" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-400 hover:underline font-medium truncate"
+                          >
+                            {ghInfo.isRepo ? `${ghInfo.owner}/${ghInfo.repo}` : item.title}
+                          </a>
+                          <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        </div>
+                        {ghInfo.isRepo && item.title && !item.title.includes(ghInfo.repo!) && (
+                          <p className="text-sm text-white/80 mt-0.5 truncate">
+                            {item.title}
+                          </p>
+                        )}
+                        {item.content && (
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            {item.content.slice(0, 200)}{item.content.length > 200 ? '...' : ''}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {results.length > 8 && (
+                <div className="text-xs text-muted-foreground pl-2 pt-1">
+                  + {results.length - 8} more results
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No GitHub content found</p>
+          )}
+        </div>
+      );
+    }
+
     if (toolName === "deepWebSearch") {
       // The result can be either:
       // 1. A SearchProgress object (with status, result, etc.) - this is what the streaming returns
@@ -1012,92 +1370,6 @@ function AISearchContent() {
 
       // It's a direct SearchAnalysis object
       return <SearchAgentCard analysis={data as SearchAnalysis} />;
-    }
-
-    if (toolName === "linkedinSearch") {
-      const data = result as {
-        searchParams?: {
-          searchQuery?: string;
-          currentJobTitles?: string[];
-          locations?: string[];
-          currentCompanies?: string[];
-        };
-        profiles: Array<{
-          name: string;
-          headline: string | null;
-          location: string | null;
-          profileUrl: string;
-          currentCompany: string | null;
-          currentRole: string | null;
-          about: string | null;
-          openToWork: boolean;
-          verified: boolean;
-          connectionCount: number | null;
-          topSkills: string | null;
-          experience: Array<{
-            title: string;
-            company: string;
-            duration: string | null;
-            isCurrent: boolean;
-          }>;
-          education: Array<{
-            school: string;
-            degree: string | null;
-            field: string | null;
-          }>;
-          skills: string[];
-        }>;
-        total: number;
-      };
-
-      return (
-        <LinkedInSearchResult
-          profiles={data.profiles}
-          searchParams={data.searchParams}
-          total={data.total}
-        />
-      );
-    }
-
-    if (toolName === "linkedinProfile") {
-      const data = result as {
-        name: string;
-        firstName?: string | null;
-        lastName?: string | null;
-        headline: string | null;
-        location: string | null;
-        profileUrl: string;
-        profileImage?: string | null;
-        currentCompany: string | null;
-        currentRole: string | null;
-        about: string | null;
-        openToWork: boolean;
-        verified: boolean;
-        hiring?: boolean;
-        premium?: boolean;
-        connectionCount: number | null;
-        followerCount?: number | null;
-        topSkills: string | null;
-        experience: Array<{
-          title: string;
-          company: string;
-          duration: string | null;
-          isCurrent: boolean;
-        }>;
-        education: Array<{
-          school: string;
-          degree: string | null;
-          field: string | null;
-        }>;
-        skills: string[];
-        certifications?: Array<{
-          name: string;
-          issuingOrganization: string | null;
-        }>;
-        languages?: string[];
-      };
-
-      return <LinkedInProfileResult profile={data} />;
     }
 
     return null;
@@ -1310,6 +1582,14 @@ function AISearchContent() {
                               const isPreliminary = isPreliminaryRepo || isPreliminarySearch;
                               const showFinalResult = hasResult && !isPreliminary;
 
+                              // Hide tools that returned zero results
+                              if (showFinalResult && hasEmptyResults(toolName, toolResult)) {
+                                return null;
+                              }
+
+                              // For analyzeGitHubProfile, check if displayExpanded is set
+                              const profileDisplayExpanded = toolName === "analyzeGitHubProfile" && toolResult && typeof toolResult === 'object' && 'displayExpanded' in toolResult && (toolResult as { displayExpanded?: boolean }).displayExpanded === true;
+
                               return (
                                 <div key={`tool-${i}`} className="space-y-2">
                                   {isPreliminaryRepo && toolResult ? (
@@ -1319,7 +1599,7 @@ function AISearchContent() {
                                     // Show streaming progress for deep web search
                                     <SearchAgentProgress progress={toolResult as SearchProgress} />
                                   ) : showFinalResult ? (
-                                    <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "analyzeGitHubProfile" && toolName !== "deepWebSearch" && toolName !== "linkedinSearch" && toolName !== "linkedinProfile"} hasFollowingTool={hasFollowingTool}>
+                                    <CollapsibleToolResult toolName={toolName} autoCollapse={toolName !== "getTopCandidates" && toolName !== "generateDraftEmail" && toolName !== "analyzeGitHubRepository" && toolName !== "deepWebSearch" && !profileDisplayExpanded} hasFollowingTool={hasFollowingTool} result={toolResult}>
                                       {toolResult != null && renderToolResult(toolName, toolResult)}
                                     </CollapsibleToolResult>
                                   ) : toolName === "analyzeGitHubRepository" ? (
@@ -1344,10 +1624,10 @@ function AISearchContent() {
                                                   ? `Searching the web for "${(toolPart.input as { query?: string })?.query || 'information'}"...`
                                                   : toolName === "scrapeUrls"
                                                     ? `Scraping ${(toolPart.input as { urls?: string[] })?.urls?.length || ''} URL${((toolPart.input as { urls?: string[] })?.urls?.length || 0) !== 1 ? 's' : ''}...`
-                                                    : toolName === "linkedinSearch"
-                                                      ? `Searching LinkedIn profiles...`
-                                                      : toolName === "linkedinProfile"
-                                                        ? `Fetching LinkedIn profile for ${(toolPart.input as { profileUrlOrUsername?: string })?.profileUrlOrUsername || 'user'}...`
+                                                    : toolName === "searchLinkedInProfiles"
+                                                      ? `Searching LinkedIn for "${(toolPart.input as { query?: string })?.query || 'profiles'}"...`
+                                                      : toolName === "searchGitHubContent"
+                                                        ? `Searching GitHub for "${(toolPart.input as { query?: string })?.query || 'content'}"...`
                                                         : `Analyzing ${(toolPart.input as { username?: string })?.username || 'profile'}...`}
                                       </span>
                                     </div>
@@ -1364,6 +1644,8 @@ function AISearchContent() {
                                 <div key={`text-${i}`} className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-md px-4 py-3">
                                   <div className="text-white prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-emerald-300 prose-pre:bg-white/10 prose-pre:border prose-pre:border-white/10">
                                     <ReactMarkdown
+                                      remarkPlugins={[remarkGfm]}
+                                      rehypePlugins={[rehypeRaw]}
                                       components={{
                                         table: ({ children }) => (
                                           <div className="overflow-x-auto my-4">
@@ -1374,6 +1656,9 @@ function AISearchContent() {
                                         ),
                                         thead: ({ children }) => (
                                           <thead className="bg-white/10">{children}</thead>
+                                        ),
+                                        tbody: ({ children }) => (
+                                          <tbody>{children}</tbody>
                                         ),
                                         th: ({ children }) => (
                                           <th className="border border-white/20 px-3 py-2 text-left font-semibold text-white">
@@ -1388,9 +1673,12 @@ function AISearchContent() {
                                         tr: ({ children }) => (
                                           <tr className="hover:bg-white/5 transition-colors">{children}</tr>
                                         ),
+                                        code: ({ children }) => (
+                                          <code className="bg-white/10 px-1 py-0.5 rounded text-emerald-300">{children}</code>
+                                        ),
                                       }}
                                     >
-                                      {textPart.text}
+                                      {textPart.text.replace(/`([^`]+)`/g, '<code>$1</code>')}
                                     </ReactMarkdown>
                                   </div>
                                 </div>
