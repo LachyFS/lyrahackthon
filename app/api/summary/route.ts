@@ -44,13 +44,13 @@ const requestSchema = z.object({
 
 export async function POST(req: Request) {
   // Vercel BotID Protection - reject requests from bots
-  const verification = await checkBotId();
-  if (verification.isBot) {
-    return new Response(
-      JSON.stringify({ error: "Automated requests are not allowed." }),
-      { status: 403, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  // const verification = await checkBotId();
+  // if (verification.isBot) {
+  //   return new Response(
+  //     JSON.stringify({ error: "Automated requests are not allowed." }),
+  //     { status: 403, headers: { "Content-Type": "application/json" } }
+  //   );
+  // }
 
   // Require authentication for AI generation
   const supabase = await createClient();

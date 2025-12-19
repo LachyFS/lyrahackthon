@@ -5,8 +5,10 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { getGitHubToken } from "@/lib/github-token";
 import { unstable_cache } from "next/cache";
+import { getCached, setCache } from "@/lib/redis";
 
 const CACHE_TTL = 3600; // 1 hour in seconds
+const ANALYSIS_CACHE_TTL = 10 * 60; // 10 minutes for full analysis results
 
 export interface GitHubProfile {
   login: string;
@@ -897,6 +899,33 @@ export async function analyzeGitHubProfile(username: string): Promise<AnalysisRe
       recommendation: llmAnalysis.recommendation,
     },
   };
+}
+
+// Cached version that checks Redis first - use this for page loads to avoid re-analyzing
+export async function getCachedAnalysis(username: string): Promise<AnalysisResult> {
+  const cacheKey = `analysis:${username.toLowerCase()}`;
+
+  // Check Redis cache first
+  try {
+    const cached = await getCached<AnalysisResult>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  } catch (cacheError) {
+    console.error("Cache read error:", cacheError);
+  }
+
+  // Cache miss - perform full analysis
+  const result = await analyzeGitHubProfile(username);
+
+  // Store in Redis cache
+  try {
+    await setCache(cacheKey, result, ANALYSIS_CACHE_TTL);
+  } catch (cacheError) {
+    console.error("Cache write error:", cacheError);
+  }
+
+  return result;
 }
 
 // Lightweight function to fetch just collaboration data for network graph navigation

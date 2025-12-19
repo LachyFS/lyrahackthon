@@ -12,13 +12,13 @@ export async function GET(
   { params }: { params: Promise<{ username: string }> }
 ) {
   // Vercel BotID Protection - reject requests from bots
-  const verification = await checkBotId();
-  if (verification.isBot) {
-    return NextResponse.json(
-      { error: "Automated requests are not allowed." },
-      { status: 403 }
-    );
-  }
+  // const verification = await checkBotId();
+  // if (verification.isBot) {
+  //   return NextResponse.json(
+  //     { error: "Automated requests are not allowed." },
+  //     { status: 403 }
+  //   );
+  // }
 
   // Require authentication for AI generation
   const supabase = await createClient();

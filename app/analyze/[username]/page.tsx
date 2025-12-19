@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
-import { analyzeGitHubProfile, type AnalysisResult } from "@/lib/actions/github-analyze";
+import { getCachedAnalysis, type AnalysisResult } from "@/lib/actions/github-analyze";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -95,7 +95,7 @@ async function AnalysisContent({ username, user }: { username: string; user: Use
   let result: AnalysisResult;
 
   try {
-    result = await analyzeGitHubProfile(username);
+    result = await getCachedAnalysis(username);
   } catch (error) {
     if (error instanceof Error && error.message === "User not found") {
       notFound();
